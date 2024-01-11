@@ -3,6 +3,8 @@ title: "01_11_IntroRMD"
 author: "Chris Nieters"
 date: "2024-01-11"
 output: html_document
+editor_options:
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
