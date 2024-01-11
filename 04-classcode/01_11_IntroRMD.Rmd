@@ -7,24 +7,196 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
 ```
 
-## R Markdown
+```{r}
+## 2024 CRSS 8220 - Jan 11 Agenda
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+# Housekeeping:
+## Website (bookmark it!): https://leombastos.github.io/bastoslab/teaching/2024-dsa/2024-dsa.html
+## GitHub: material, constantly being updated 
+## YouTube: recordings  
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+# Setting up RStudio:
+## Tools > Global Options > General > Workspace > uncheck "Restore ...", select "Never" on dropdown menu  
+## Tools > Global Options > R markdown > Show in document outline > Sections and Named Chunks
 
-```{r cars}
-summary(cars)
+
+# Learning objectives ----
+# - Become familiarized with using R and RStudio
+# - Learn about R terminology and syntax
+# - Understand different object types
+# - Create a simple data, explore it with numbers and graphics
+# - Learn about RStudio projects, create your own, set up proper sub-directories  
 ```
 
-## Including Plots
+# 1) R/Rstudio ----
+```{r}
 
-You can also embed plots, for example:
+## Why R? 
+### free, 
+### runs on multiple platforms, 
+### online community and support, 
+### continuous development, 
+### reproducible research!
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+## Why RStudio?
+### Integrates various components of an analysis
+### Colored syntax
+### Syntax suggestions
+
+## RStudio panels
+### Script  
+### Console
+### Environment
+### Files/Plots/Help
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+# 2) R terminology ----
+```{r}
+# Object
+
+a <- 45/13
+
+b <- c(10,15,5)
+
+c <- "precision ag"
+
+## Object classes
+### Data frame
+d <- data.frame(number = b,
+                id = c)
+
+### Matrices
+e <- matrix(c(b,b), ncol = 2)
+
+
+### Lists 
+f <- list("number" = a, "numbers" = b,
+          "word" = c, 'data' = d) 
+
+class(f)
+class(f$number)
+class(d$number)
+
+## Function
+mean(b)
+
+mean(x = b)
+
+help(mean)
+
+
+## Argument
+
+b2 <- c(10,15,5,NA)
+
+mean(b2, na.rm = TRUE)
+
+mean(na.rm = T,
+     x = b2)
+
+## Package
+## Install vs. load a package
+# install.packages("tibble")
+
+library(tibble)
+
+
+## Let's install package tibble, then load it
+```
+
+
+# 3) Creating a data set, exploring it ----
+```{r}
+
+intro <- tribble(~name, ~height, ~favcrop,
+                 "Reneliza", 160, "rice",
+                 "Jazib", 168, "alfalfa",
+                 "Anish", 177, "cotton",
+                 "Usman", 182, "maize")
+
+# Check class, summary, and structure
+
+class(intro)
+summary(intro)
+head(intro, n = 2)
+tail(intro, n = 2)
+
+
+# Sampling the dataset
+# First row only
+#arguments are [x,y]
+row1 <- intro[1,]
+row1 <- intro |> dplyr::slice(1)
+
+# First column only
+col1 <-  intro[,1]
+
+# Rows 1 to 3 and columns 1 to 3
+intro[1:3,1:3]
+
+# Rows 1 and 3 and columns 1 and 3
+intro[c(1,3), c(1,3)]
+
+```
+
+# 4) ggplot2 philosophy and plots ---- 
+```{r}
+
+install.packages("ggplot2")
+library(ggplot2)
+
+intro |>
+  ggplot(aes(x = name, y = height, color = favcrop,
+             fill = favcrop))+
+  geom_point(size = 3, aes(shape = favcrop))+
+  ylab("Height")+
+  xlab("Name")
+
+
+# Point
+
+# Customizing
+
+intro |>
+  ggplot(aes(x = name, y = height, color = favcrop,
+             fill = favcrop))+
+  geom_col(width = 0.2)+
+  geom_hline(yintercept = mean(intro$height),
+             linetype = "dashed",
+             size = 1)+
+  scale_color_viridis_d()+
+  scale_fill_viridis_d()+
+  theme_bw()+
+  ylab("Height")+
+  xlab("Name")
+
+# Exporting
+ggsave("plot1.png")
+
+
+```
+
+# 5) RStudio projects ----
+```{r}
+## Inside of your course main folder, create a sub-folder called 02 - data wrangling
+## Create sub-folders data, code, output
+## Create an RStudio project at the level of main folder (e.g., 02 - data wrangling)
+## Create an Rmarkdwon file (just to explore, not saving it) 
+
+```
+
+
+# 6) Assignment #1 - Play with ggplot
+```{r}
+# Play with scale_color_ , explore the available options, choose one different from the one in class
+# play with theme_ , explore the available options, choose one different from the one in class
+# Export your new version saving it as "plot_a1_LASTNAME.png"
+# Upload your new plot to GitHub under issue "Assignment #1"
+
+```
+
