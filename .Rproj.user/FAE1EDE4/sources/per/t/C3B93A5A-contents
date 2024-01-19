@@ -1,0 +1,2197 @@
+---
+title: "VF Trial 07 Analysis"
+author: "Chris Nieters"
+date: "`r Sys.Date()`"
+output:
+  workflowr::wflow_html:
+    toc: true
+    code_folding: hide
+editor_options:
+  chunk_output_type: console
+params:
+  update: TRUE
+---
+# setup
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE,message = FALSE,warning = FALSE,comment = FALSE,fig.width = 6,fig.height = 8)
+
+### This chunk includes all data import, function location, and function exeion
+library(tidyverse)
+library(googlesheets4)
+library(ggpubr)
+library(ggsci)
+library(here)
+
+
+#locate functions used to model and calulate LRC parameters
+map(list.files(here::here("R"),pattern = "(.R)",full.names = TRUE),source)
+
+```
+
+# Trial key
+```{r}
+
+trial_key <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Key",
+              col_types = c("c")) %>%
+    mutate_at(vars(Transplant_Date), lubridate::as_date) %>%
+    mutate_at(vars(Tray), as.numeric) %>%
+  mutate(
+    Code = case_when(
+      NSMS == "1" ~ "CTRL",
+      NSMS == "2" ~ "FULL",
+      NSMS == "3" ~ "EC",
+      NSMS == "4" ~ "HALF",
+      NSMS == "5" ~ "WUE",
+      NSMS == "6" ~ "LAB"),
+    Code = fct_relevel(Code, "CTRL","FULL","HALF","EC",
+                                     "WUE","LAB"))
+```
+
+# Refill
+## Treatment #6
+```{r}
+
+ns_levels <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "NS Level",
+              col_types = c("c")) %>%
+    mutate_at(vars(9:12, Tray), as.numeric) %>%
+    mutate(
+      Date = lubridate::as_date(Date))
+
+
+t6_refill <- calc_nsms6(ns_levels, trial_key,
+                        Trial = 7,
+                        Timepoint = 3,
+                       Harvest_Days = 7,
+                       Refill_Days = 4)|>
+  mutate(Treatment = "6")
+
+
+t6_refill %>%
+  dplyr::filter(uL_to_Add > 0,
+                !Fertilizer == "NH4Mo") |>
+  ggplot(aes(x = PPFD, y = uL_to_Add,
+             color = Fertilizer, label = uL_to_Add))+
+  geom_point(shape = 1, size = 12)+
+  geom_text(size = 3)+
+  facet_wrap(~Fertilizer, scales = "free")+
+  theme(legend.position = "none")
+
+
+```
+
+## Treatment #5
+```{r}
+
+
+harvest <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Harvest",
+              col_types = c("c")) %>%
+  mutate_at(vars(4:9), as.numeric) %>%
+  mutate_at(vars(Date), lubridate::as_date) 
+
+
+t5_refill <- calc_nsms5(ns_levels, trial_key,
+                        harvest,Timepoint = 3,
+                        Harvest_Days = 7,
+                       Refill_Days = 4) |>
+  mutate(Treatment = "5")
+
+t5_refill |>
+  dplyr::filter(uL_to_Add > 0,
+                !Fertilizer == "NH4Mo") |>
+  ggplot(aes(x = PPFD, y = uL_to_Add,
+             color = Fertilizer, label = uL_to_Add))+
+  geom_point(shape = 1, size = 12)+
+  geom_text(size = 3)+
+  facet_wrap(~Fertilizer, scales = "free")+
+  theme(legend.position = "none")
+
+```
+## Combined Refill Plot
+```{r}
+
+combined <- t5_refill |>
+  full_join(t6_refill)
+
+combined |>
+  dplyr::filter(uL_to_Add > 0,
+                !Fertilizer == "NH4Mo") |>
+  ggplot(aes(x = PPFD, y = uL_to_Add,
+             color = Treatment, label = uL_to_Add))+
+  geom_point(shape = 1, size = 12)+
+  geom_text(size = 3)+
+  facet_wrap(~Fertilizer, scales = "free")+
+  theme(legend.position = "bottom")
+
+```
+
+
+# Harvest
+```{r}
+
+
+harvest_raw <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Harvest",
+              col_types = c("c")) %>%
+  mutate_at(vars(4:15), as.numeric) %>%
+  mutate_at(vars(Date), lubridate::as_date) 
+
+
+harvest <- trial_key %>%
+  full_join(harvest_raw, multiple = "all") %>%
+  mutate(
+    DAT = Date - Transplant_Date,
+    RS_Ratio = Dry_Root/Dry_Canopy) %>%
+  dplyr::select(DAT,c(1:17), RS_Ratio) |>
+  dplyr::filter(!Tub_ID == "0",
+                Timepoint %in% c("2","4"))
+
+
+harvest_long <- harvest %>%
+  pivot_longer(
+    -c(1:12),
+    names_to = "metric",
+    values_to = "value"
+  )
+
+harvest_means <- harvest_long %>%
+  group_by(PPFD,DAT, metric) %>%
+  summarise(
+    mean = mean(value),
+    sd = sd(value),
+    n = length(value),
+    se = sd / sqrt(n),
+    value = mean
+  )
+
+```
+
+### FC Barplots
+```{r}
+
+harvestm <- harvest %>%
+  mutate_at(vars(Level,PPFD,Code,Rack,DAT), as.factor) %>%
+  mutate(DAT. = paste(DAT,"DAT"),
+         DAT. = fct_relevel(DAT., "11 DAT","25 DAT"))
+
+harvestm %>%
+  ggplot(aes(x = Fresh_Canopy, fill = PPFD))+
+  facet_wrap(~DAT., scales = "free")+
+  geom_density()
+
+attach(harvestm)
+
+mod <- lm(Fresh_Canopy ~ PPFD*Code*DAT.)
+anova(mod)
+
+
+anova <- aov(Fresh_Canopy ~ PPFD*DAT.)
+tukey <- TukeyHSD(anova)
+cld<- multcompView::multcompLetters4(anova,tukey)
+
+tidy(tukey)
+
+harvestm_tk <- harvestm %>%
+    group_by(PPFD,DAT.) %>%
+    summarise(mean=mean(Fresh_Canopy, na.rm=T),
+              quant = quantile(Fresh_Canopy,
+                               probs = 0.75,
+                               na.rm=T)) %>%
+    arrange(desc(mean)) %>%
+    mutate(emmean = mean)
+
+# extracting the compact letter display and adding to the Tk table
+cld <- as.data.frame.list(cld$`PPFD:DAT.`)
+harvestm_tk['cld'] = cld$Letters
+
+
+
+
+#Plot mean
+harvestm %>%
+  mutate(emmean = Fresh_Canopy)%>%
+ggplot(aes(x = PPFD, y = emmean, color = PPFD)) +
+  geom_boxplot(size = 1) +
+  # geom_errorbar(aes(ymin = emmean - se,
+  #                   ymax = emmean +se),
+  #               position = position_dodge(0.5),
+  #               width = 0.2, color = "black",
+  #               linewidth = 1) +
+  # geom_bar(stat = "identity", position = position_dodge(0.5),
+  #          width = 0.5) +
+  geom_jitter(width = 0.1,
+              alpha = 0.2, size = 2, shape = 20)+
+  geom_text(
+    data = harvestm_tk,
+    aes(label = cld, y = quant),
+    color = "black",
+    vjust = -0.75,
+      hjust = -0.5,
+    size = 5)+
+  facet_grid(~DAT.)+
+  scale_color_npg()+
+  scale_fill_npg()+
+  #theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      axis.text.x = element_blank(),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "bottom")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.0),nrow = 1,
+     title = "PPFD"))+
+  ylab("Fresh Canopy Biomass (g)")
+  #scale_y_continuous(breaks = scales::breaks_pretty(5))
+
+```
+### FC ANOVAS
+
+```{r}
+
+harvestm <- harvest %>%
+  mutate_at(vars(Level,PPFD,NSMS,Rack,DAT), as.factor)
+
+attach(harvestm)
+
+mod <- lm(Fresh_Canopy ~ PPFD*DAT)
+
+anova <- aov(Fresh_Canopy ~ PPFD*DAT)
+
+tukey <- TukeyHSD(anova)
+
+tukey = TukeyHSD(aov(mod), conf.level = 0.95)
+tukey_
+
+tidy <- broom::tidy(tukey) %>%
+  dplyr::filter(adj.p.value < 0.05)
+
+cld<- multcompView::multcompLetters4(anova,tukey)
+
+harvestm_tk = harvestm %>%
+    group_by(PPFD,DAT) %>%
+    summarise(mean=mean(Fresh_Canopy , na.rm=T), quant = quantile(Fresh_Canopy, probs = 0.75, na.rm=T)) %>%
+    arrange(desc(mean))
+
+# extracting the compact letter display and adding to the Tk table
+cld <- as.data.frame.list(cld$`PPFD:DAT`)
+harvestm_tk['cld'] = cld$Letters
+
+
+#Plot mean
+harvest_long%>%
+ dplyr::filter(#metric == "RS_Ratio",
+         metric == 'Fresh_Canopy') %>%
+  ggplot(
+       aes(x = PPFD, y = value, color = PPFD)) +
+  # geom_bar(stat = "identity", position = position_dodge(0.5),
+  #          width = 0.5) +
+ geom_boxplot() +
+  ylab("Stomatal conductance (mmol/m^2/s)")+
+ theme_bw()+
+  facet_grid(~DAT, scales = "free") +
+  theme_bw()+
+  scale_fill_npg()+
+  scale_color_npg()+
+  #ylim(-0.01,0.2)+
+  theme(
+    axis.title.y = element_text(margin = margin(r = 20)),
+    axis.title.x = element_text(margin = margin(t = 20)))+
+  ylab("Root Dry Biomass (g)")
+
+
+
+
+```
+
+### FC Timeseries
+```{r}
+
+
+harvest_means%>%
+  filter(#metric == "RS_Ratio",
+         metric == 'Fresh_Canopy')%>%
+  ggplot(aes(x = DAT, y = value, fill = PPFD,
+             color= PPFD))+
+    # stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75,
+    #           alpha = 0.7, se = F)+
+  geom_line(linewidth = 0.8, alpha = 0.5)+
+  geom_point(size = 3)+
+  geom_errorbar(
+    width= 0.3,
+    aes(ymin = value - se,
+    ymax = value + se))+
+   theme_bw()+
+  scale_fill_npg()+
+  scale_color_npg()+
+  #ylim(0,900)+
+  theme(
+    axis.title.x = element_text(
+    size = 16,
+    face = "bold",
+    margin = margin(t = 25)),
+    axis.title.y = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(r = 25)),
+      axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 14,
+        face = "bold"),
+      axis.text.x = element_text(
+        margin = margin(t = 6),
+        size = 14,
+        face = "bold"),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 14),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.2)))+
+  guides(fill=guide_legend("NSMS"),
+         color=guide_legend("NSMS"))+
+  ylab("Canopy Dry Biomass (g)")
+
+
+
+```
+### DC Barplots
+```{r}
+
+harvestm <- harvest %>%
+  mutate_at(vars(Level,PPFD,Code,Rack,DAT), as.factor) %>%
+  mutate(DAT. = paste(DAT,"DAT"),
+         DAT. = fct_relevel(DAT., "11 DAT","25 DAT"))
+
+harvestm %>%
+  ggplot(aes(x = Dry_Canopy, fill = PPFD))+
+  facet_wrap(~DAT., scales = "free")+
+  geom_density()
+
+attach(harvestm)
+
+mod <- lm(Dry_Canopy ~ PPFD*Code*DAT.)
+anova(mod)
+
+
+anova <- aov(Dry_Canopy ~ PPFD*DAT.)
+tukey <- TukeyHSD(anova)
+cld<- multcompView::multcompLetters4(anova,tukey)
+
+harvestm_tk <- harvestm %>%
+    group_by(PPFD,DAT.) %>%
+    summarise(mean=mean(Dry_Canopy , na.rm=T),
+              quant = quantile(Dry_Canopy,
+                               probs = 0.75,
+                               na.rm=T)) %>%
+    arrange(desc(mean)) %>%
+    mutate(emmean = mean)
+
+# extracting the compact letter display and adding to the Tk table
+cld <- as.data.frame.list(cld$`PPFD:DAT.`)
+harvestm_tk['cld'] = cld$Letters
+
+
+
+
+#Plot mean
+harvestm %>%
+  mutate(emmean = Dry_Canopy)%>%
+ggplot(aes(x = PPFD, y = emmean, color = PPFD)) +
+  geom_boxplot(size = 1)+
+  # geom_errorbar(aes(ymin = emmean - se,
+  #                   ymax = emmean +se),
+  #               position = position_dodge(0.5),
+  #               width = 0.2, color = "black",
+  #               linewidth = 1) +
+  # geom_bar(stat = "identity", position = position_dodge(0.5),
+  #          width = 0.5) +
+  geom_jitter(width = 0.1,
+              alpha = 0.2, size = 2, shape = 20)+
+  geom_text(
+    data = harvestm_tk,
+    aes(label = cld, y = quant),
+    color = "black",
+    vjust = -0.75,
+      hjust = -0.5,
+    size = 5)+
+  facet_grid(~DAT.)+
+   scale_color_npg()+
+  scale_fill_npg()+
+  #theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      axis.text.x = element_blank(),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "bottom")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.0),nrow = 1,
+     title = "PPFD"))+
+  ylab("Dry Canopy Biomass (g)")+
+  scale_y_continuous(breaks = scales::breaks_pretty(5))
+
+```
+### DC ANOVAS
+
+```{r}
+
+harvestm <- harvest %>%
+  mutate_at(vars(Level,PPFD,NSMS,Rack,DAT), as.factor)
+
+attach(harvestm)
+
+mod <- lm(Dry_Canopy ~ PPFD*DAT)
+
+anova <- aov(Dry_Canopy ~ PPFD*DAT)
+
+tukey <- TukeyHSD(anova)
+
+tukey = TukeyHSD(aov(mod), conf.level = 0.95)
+tukey_
+
+tidy <- broom::tidy(tukey) %>%
+  dplyr::filter(adj.p.value < 0.05)
+
+cld<- multcompView::multcompLetters4(anova,tukey)
+
+harvestm_tk = harvestm %>%
+    group_by(PPFD,DAT) %>%
+    summarise(mean=mean(Dry_Canopy , na.rm=T), quant = quantile(Dry_Canopy, probs = 0.75, na.rm=T)) %>%
+    arrange(desc(mean))
+
+# extracting the compact letter display and adding to the Tk table
+cld <- as.data.frame.list(cld$`PPFD:DAT`)
+harvestm_tk['cld'] = cld$Letters
+
+
+#Plot mean
+harvest_long%>%
+ dplyr::filter(#metric == "RS_Ratio",
+         metric == 'Dry Canopy (g)') %>%
+  ggplot(
+       aes(x = PPFD, y = value, color = PPFD)) +
+  # geom_bar(stat = "identity", position = position_dodge(0.5),
+  #          width = 0.5) +
+ geom_boxplot() +
+  ylab("Stomatal conductance (mmol/m^2/s)")+
+ theme_bw()+
+  facet_grid(~DAT, scales = "free") +
+  theme_bw()+
+  scale_fill_npg()+
+  scale_color_npg()+
+  #ylim(-0.01,0.2)+
+  theme(
+    axis.title.y = element_text(margin = margin(r = 20)),
+    axis.title.x = element_text(margin = margin(t = 20)))+
+  ylab("Root Dry Biomass (g)")
+
+
+
+
+```
+
+### DC Timeseries
+```{r}
+
+
+harvest_means%>%
+  filter(#metric == "RS_Ratio",
+         metric == 'Dry_Canopy')%>%
+  ggplot(aes(x = DAT, y = value, fill = PPFD,
+             color= PPFD))+
+    # stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75,
+    #           alpha = 0.7, se = F)+
+  geom_line(linewidth = 0.8, alpha = 0.5)+
+  geom_point(size = 3)+
+  geom_errorbar(
+    width= 0.3,
+    aes(ymin = value - se,
+    ymax = value + se))+
+   theme_bw()+
+  scale_fill_npg()+
+  scale_color_npg()+
+  #ylim(0,900)+
+  theme(
+    axis.title.x = element_text(
+    size = 16,
+    face = "bold",
+    margin = margin(t = 25)),
+    axis.title.y = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(r = 25)),
+      axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 14,
+        face = "bold"),
+      axis.text.x = element_text(
+        margin = margin(t = 6),
+        size = 14,
+        face = "bold"),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 14),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.2)))+
+  guides(fill=guide_legend("NSMS"),
+         color=guide_legend("NSMS"))+
+  ylab("Canopy Dry Biomass (g)")
+
+
+
+```
+
+# NS
+
+```{r}
+
+
+ns_raw <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "EC pH Temp",
+              col_types = c("c")) %>%
+    mutate_at(vars(8:13, Tray), as.numeric) %>%
+    mutate(
+      Date = lubridate::as_date(Date))
+
+ns <- ns_raw %>%
+  full_join(trial_key) %>%
+  mutate_at(vars(8:14), as.numeric) %>%
+  mutate(
+    DAT = Date - TransplantDate,
+    Code = fct_relevel(Code, "CTRL","FULL","HALF","EC",
+                                     "WUE","LAB"))
+
+
+ns_long <- ns %>%
+  pivot_longer(
+    c(8:10),
+    names_to = "metric",
+    values_to = 'value'
+  ) %>%
+  mutate(
+    PPFD. = paste(PPFD,"PPFD")
+  )
+
+
+```
+
+### EC pH Temp
+```{r}
+
+
+attach(ns)
+
+mod <- lm(Temp ~ PPFD*NSMS)
+
+summary(mod)
+anova(mod)
+
+
+TukeyHSD(aov(mod), conf.level = 0.90)
+plot(TukeyHSD(aov(mod), conf.level = 0.90))
+
+mod_means_contr <- emmeans::emmeans(object = mod,
+                                    pairwise ~ "~PPFD*NSMS",
+                                    adjust = "tukey")
+
+mod_means <- multcomp::cld(object = mod_means_contr$emmeans,
+                           Letters = letters)
+
+#Plot mean
+ggplot(data = mod_means,
+       aes(x = DAT, y = emmean, fill = PPFD)) +
+  facet_grid(~NSMS)+
+  # geom_errorbar(aes(ymin = lower.CL, 
+  #                   ymax = upper.CL), 
+  #               width = 0.2) +
+  geom_bar(stat = "identity", position = position_dodge(0.5),
+           width = 0.5, alpha = 0.8) +
+  geom_text(aes(label = gsub(" ", "", .group)),
+            position = position_dodge(0.5),
+            vjust = -1.5,
+            color = "black")+
+  theme_bw()+
+  scale_fill_viridis_d()+
+  #ylim(0,18)+
+  theme(
+    axis.title.y = element_text(margin = margin(r = 20)),
+    axis.title.x = element_text(margin = margin(t = 20)))
+
+
+means <- ns_long %>%
+  group_by(PPFD,NSMS,DAT, metric) %>%
+  summarise(
+    mean = mean(value),
+    sd = sd(value),
+    n = length(value),
+    se = sd / sqrt(n),
+    value = mean
+  ) %>%
+  drop_na(value)
+
+ns_long %>%
+  filter(metric == "pH",
+         !Tub_ID %in% c(36,51)) %>%
+  ggplot(aes(x = DAT, y = value, color = Code,
+             fill = Code))+
+  geom_hline(yintercept = 6, color = "green",
+            linewidth = 38, alpha = 0.2)+
+  stat_smooth(method = "lm",
+              formula = y ~ x + I(x^2),
+              linewidth = 1.4,
+              alpha = 0) +
+  scale_color_npg()+
+  scale_fill_npg()+
+  theme_bw()+
+  facet_grid(~ PPFD., scales = 'free')+
+  ylab("Value")+
+  theme(panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.x = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(t = 15)),
+      axis.title.y = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(r = 25)),
+      axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 14,
+        face = "bold"),
+      axis.text.x = element_text(
+        margin = margin(t = 6),
+        size = 14,
+        face = "bold"),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.0)))+
+  guides(fill=guide_legend("NSMS"),
+         color=guide_legend("NSMS"))+
+  ylab("pH")
+
+  
+
+```
+
+### Levels
+```{r}
+
+levels_raw <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "NS Level",
+              col_types = c("c")) %>%
+    mutate_at(vars(9:12,Tray), as.numeric) %>%
+    mutate(
+      Date = lubridate::as_date(Date),
+            Timepoint = as.numeric(Timepoint))
+
+levels_1 <- levels_raw %>%
+  dplyr::filter(NSMS == "1") %>%
+  dplyr::select(Tub_ID, NSMS, Refill_NSMS1) %>%
+  drop_na(Refill_NSMS1) %>%
+  mutate_at(vars(Refill_NSMS1), as.numeric) %>%
+  group_by(Tub_ID) %>%
+  summarise(
+    L_H2O = sum(Refill_NSMS1)
+  )
+
+levels_rest <- levels_raw %>%
+  dplyr::filter(!NSMS == "1") %>%
+  full_join(trial_key) %>%
+  drop_na(Corrected_Volume_Loss) %>%
+  group_by(Tub_ID) %>%
+  summarise(
+    L_H2O = sum(Corrected_Volume_Loss)) %>%
+  ungroup()
+
+levels <- levels_1 %>%
+  full_join(levels_rest)%>%
+  full_join(trial_key%>%
+              dplyr::select(Tub_ID,PPFD,Code, NSMS))%>%
+  dplyr::filter(!Tub_ID %in% c("36","51"))
+
+
+level_maths <- levels %>%
+  filter(!Code == "CTRL")
+  mutate(
+    high_low = ifelse(
+      Code %in% c("CTRL"), "high", "low")) %>%
+  group_by(high_low,PPFD)%>%
+  summarise(mean = mean(L_H2O))
+
+
+11.5+13.8+14.8
+40.1/3
+ev = 13.4
+
+72.9+73.6+73.2
+219.7/3
+sv = 73.2
+
+pd = (sv-ev)/sv *100
+pd
+
+summary%>%
+  ggplot(aes(x = Code, y = mean,
+             color = Code, fill = Code,
+             shape = PPFD))+
+  geom_point()
+
+### Models
+
+levelsm <- levels %>%
+  mutate_at(vars(PPFD,Code), as.factor)
+  dplyr::filter(!Code == "CTRL")
+
+
+attach(levelsm)
+
+mod <- lm(L_H2O ~ PPFD+Code)
+
+summary(mod)
+anova(mod)
+
+
+anova <- aov(L_H2O ~ PPFD+Code)
+tukey <- TukeyHSD(anova)
+cld<- multcompView::multcompLetters4(anova,tukey)
+
+
+levels_tk <- levelsm %>%
+    group_by(PPFD)%>%
+    summarise(mean = mean(L_H2O),
+              quant = quantile(L_H2O, probs = 0.75),
+              sd = sd(L_H2O),
+              n = length(L_H2O),
+              se = sd / sqrt(n)) %>%
+    arrange(desc(mean)) %>%
+    mutate(emmean = mean)
+
+# extracting the compact letter display and adding to the Tk table
+cld <- as.data.frame.list(cld$PPFD)
+levels_tk['cld'] = cld$Letters
+
+
+#Plot mean
+levels_tk %>%
+ggplot(aes(x = PPFD, y = emmean, fill = PPFD,
+           color = PPFD)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  #facet_grid(~PPFD)+ 
+  geom_text(
+    data = levels_tk,
+    aes(label = cld, y = mean),
+    color = "black",
+    vjust = -2.5,
+    hjust = 0.5,
+    size = 6)+
+  geom_errorbar(
+    data = levels_tk,
+    aes(ymin = emmean - se,
+        ymax = emmean + se),
+    width = 0.1, color = "black",
+    linewidth = 0.6) +
+   scale_color_npg()+
+  scale_fill_npg()+
+  #theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.x = element_text(
+         size = 20,
+         face = "bold",
+         margin = margin(t = 15)),
+        axis.text.x = element_text(
+         margin = margin(t = 8),
+         angle = 45,
+         size = 16,
+         face = "bold"),
+        axis.title.y = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(r = 25)),
+        axis.text.y = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold"),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "none")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.0)))+
+  ylab("Mean Water Added (L) / Tub")+
+  xlab("PPFD")+
+  scale_y_continuous(breaks = scales::breaks_pretty(5),
+                     limits = c(0,35))
+
+
+```
+
+### Ferts
+```{r}
+
+
+
+fert_124 <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Fert 124",
+              col_types = c("c")) %>%
+  mutate_at(vars(gL_Added), as.numeric)
+
+
+fert_56 <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Fert 56",
+              col_types = c("c")) %>%
+  mutate_at(vars(gL_Added), as.numeric)%>%
+  dplyr::select(Timepoint,NSMS,PPFD,Fertilizer,gL_Added)%>%
+  mutate(
+    gL_Added = ifelse(gL_Added < 0, 0, gL_Added),
+  ) %>%
+  dplyr::filter(!Fertilizer == "-",
+                !NSMS == "0") %>%
+  group_by(NSMS,PPFD,Fertilizer) %>%
+  summarise(
+    sum = sum(gL_Added),
+    gL_Added = sum)%>%
+  dplyr::select(-sum)
+
+
+fert_3 <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Fert 3",
+              col_types = c("c"))%>%
+  mutate_at(vars(Tray,AB_Added), as.numeric) %>%
+  mutate(total_mL_added = AB_Added) %>%
+  full_join(trial_key) %>%
+  dplyr::select(Tub_ID, PPFD, total_mL_added) %>%
+  drop_na(total_mL_added)
+
+
+fert_stock <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Fert Stock",
+              col_types = c("c"))%>%
+  mutate_at(vars(Stock_gL), as.numeric)
+
+
+fert_3_summary <- fert_3 %>%
+  group_by(Tub_ID) %>%
+  summarise(
+    total_L_added = sum(total_mL_added)/1000)
+
+
+final_3 <- fert_3_summary %>%
+  cross_join(fert_stock) %>%
+  mutate(grams_Added = total_L_added*Stock_gL,
+         .keep = "unused") %>%
+  full_join(trial_key %>% dplyr::select(Tub_ID,PPFD,NSMS)) %>%
+  drop_na(Fertilizer)
+  
+  
+### Combining Fert and H2O
+
+
+final_124 <- fert_124 %>%
+  full_join(levels, multiple = "all",
+            relationship = "many-to-many") %>%
+  mutate(
+    grams_Added = gL_Added*L_H2O,
+    .keep = "unused") %>%
+  drop_na(Fertilizer)
+
+
+final_56 <- fert_56 %>%
+  full_join(levels%>%dplyr::select(-PPFD,-Code),
+            relationship = "many-to-many") %>%
+  mutate(
+    grams_Added = gL_Added*L_H2O,
+    .keep = "unused") %>%
+  drop_na(Fertilizer)
+
+
+all_combined <- final_124 %>%
+  full_join(final_3) %>%
+  full_join(final_56) %>%
+  dplyr::filter(!Tub_ID %in% c("36","51")) %>%
+  mutate(
+    Code = case_when(
+      NSMS == "1" ~ "CTRL",
+      NSMS == "2" ~ "FULL",
+      NSMS == "3" ~ "EC",
+      NSMS == "4" ~ "HALF",
+      NSMS == "5" ~ "WUE",
+      NSMS == "6" ~ "LAB"),
+   Code = fct_relevel(Code, "CTRL","FULL","HALF","EC",
+                                     "WUE","LAB"),
+   Micro_Macro = ifelse(
+     Fertilizer %in% c("Calcium nitrate",
+                       "Iron-EDDHA",
+                       "Magnesium sulfate heptahydrate",
+                       "Monoammonium phosphate (MAP)",
+                       "Monopotassium phosphate (MKP)",
+                       "Potassium nitrate"),"Macro","Micro"
+   ))
+
+
+all_combined_means <- all_combined %>%
+  group_by(PPFD,Code,Tub_ID) %>%
+  summarise(
+    GA = mean(grams_Added),
+    sum = sum(grams_Added),
+    sd = sd(grams_Added),
+    n = length(grams_Added),
+    se = sd / sqrt(n)
+  )
+
+
+
+
+all_combinedm <- all_combined_means %>%
+  mutate_at(vars(Code,PPFD), as.factor)
+
+attach(all_combinedm)
+
+mod <- lm(GA ~ PPFD+Code)
+
+anova(mod)
+
+
+anova <- aov(GA ~ PPFD+Code)
+tukey <- TukeyHSD(anova,conf.level = 0.95)
+cld <- multcompView::multcompLetters4(anova,tukey)
+
+combined_tk <- all_combinedm%>%
+    group_by(PPFD) %>%
+    summarise(mean=mean(GA, na.rm=T),
+              quant = quantile(GA,
+                               probs = 0.75,
+                               na.rm=T),
+              sd = sd(GA),
+              n = length(GA),
+              se = sd / sqrt(n)) %>%
+    arrange(desc(mean)) %>%
+    mutate(emmean = mean)
+
+# extracting the compact letter display and adding to the Tk table
+cld <- as.data.frame.list(cld$PPFD)
+combined_tk['cld'] = cld$Letters
+
+combined_tk%>%
+  filter(PPFD == "Micro7") %>%
+  ggplot(aes(x = PPFD, y = mean, fill = PPFD, color = PPFD))+
+  geom_bar(stat = "identity", alpha = 0.8)+
+  geom_text(
+    data = combined_tk,
+    aes(label = cld, y = quant),
+    color = "black",
+    vjust = -1.5,
+    hjust = -2,
+    size = 5)+
+  geom_errorbar(aes(ymin = mean - se,
+                    ymax = mean + se),
+                width = 0.2, color = "black",
+                linewidth = 0.5) +  
+  facet_grid(~PPFD, scales = "free",
+             labeller = label_wrap_gen(width = 10,
+                                       multi_line = TRUE))+
+  scale_color_npg()+
+  scale_fill_npg()+
+  #theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.x = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(t = 25)),
+        axis.title.y = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(r = 25)),
+        axis.text.y = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold"),
+        axis.text.x = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold",
+         angle = 45),
+        legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "none")+
+     guides(colour = guide_legend(
+       nrow = 1,
+     override.aes = list(size = 1.0)))+
+  ylab("Mean grams added / tub")+
+  xlab("Nutrient Management Strategy")+
+  scale_y_continuous(breaks = scales::breaks_pretty(5),
+                     limits = c(0,4))
+
+
+fert_maths <- all_combined %>%
+  filter(!Code == "CTRL") %>%
+  mutate(
+    high_low = ifelse(
+      Code %in% c("CTRL"), "high", "low")) %>%
+  group_by(high_low,PPFD)%>%
+  summarise(mean = mean(grams_Added))
+
+1.41+1.82+1.64
+4.87/3
+ev = 1.62
+
+9.48+9.57+9.52
+28.57/3
+sv = 9.52
+
+pd = (sv-ev)/sv *100
+pd
+
+###### Single Fertilizer Plots #### 
+
+all_combined %>%
+  #filter(Micro_Macro == "Macro") %>%
+  ggplot(aes(x = Code, y = grams_Added, color = Code, fill = Code))+
+  geom_bar(stat = "identity")+
+  facet_grid(~Fertilizer, scales = "free",
+             labeller = label_wrap_gen(width = 10,multi_line = TRUE))
+
+  
+  
+
+normalized_means <- all_combined %>%
+  group_by(Fertilizer) %>%
+  mutate(
+    max = max(grams_Added),
+    min = min(grams_Added),
+    normalized_GA = (grams_Added-min)/(max-min)
+  ) %>%
+  group_by(Code,Fertilizer,Micro_Macro) %>%
+  summarise(
+        mean = mean(normalized_GA),
+    sd = sd(normalized_GA),
+    n = length(normalized_GA),
+    se = sd / sqrt(n))%>% 
+  filter(Micro_Macro == "Macro") 
+  
+
+
+  
+normalized_means%>%
+  filter(!Fertilizer %in% c(
+                           "Magnesium sulfate heptahydrate",
+                           "Monopotassium phosphate (MKP)")) %>%
+  ggplot(aes(x = Code, y = mean, fill = Code, color = Code))+
+  geom_bar(stat = "identity", alpha = 0.8)+
+  facet_grid(~Fertilizer, scales = "free",
+             labeller = label_wrap_gen(width = 10,multi_line = TRUE))+
+  geom_errorbar(aes(ymin = mean - se,
+                    ymax = mean + se),
+                width = 0.2, color = "black",
+                linewidth = 1) +  
+  scale_color_npg()+
+  scale_fill_npg()+
+  #theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.x = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(t = 25)),
+        axis.title.y = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(r = 25)),
+        axis.text.y = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold"),
+        axis.text.x = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold",
+         angle = 45),
+        legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "none")+
+     guides(colour = guide_legend(
+       nrow = 1,
+     override.aes = list(size = 1.0)))+
+  ylab("Normalized fertilizer added")+
+  xlab("NSMS")+
+  scale_y_continuous(breaks = scales::breaks_pretty(5))
+
+
+
+```
+
+
+
+### Water use efficiency
+```{r}
+
+
+levels <- levels_raw %>%
+  full_join(trial_key) %>%
+  mutate_at(vars(Timepoint, Corrected_Volume_Loss), as.numeric) %>%
+  drop_na(Corrected_Volume_Loss) %>%
+  group_by(Tub_ID) %>%
+  reframe(CumSum_Loss = cumsum(Corrected_Volume_Loss),
+          Timepoint = Timepoint) %>%
+  ungroup()
+
+harvest <- trial_key %>%
+  full_join(harvest_raw, multiple = "all") %>%
+  mutate_at(vars(Timepoint), as.numeric) %>%
+  group_by(Tub_ID, Timepoint) %>%
+  reframe(CumDry_Harvest = cumsum(`Dry Canopy (g)`)) %>%
+  ungroup()
+
+dates <- harvest_raw %>%
+  select(Date,Timepoint, Tub_ID) %>%
+  mutate(Timepoint = as.numeric(Timepoint))
+
+
+step2 <- levels %>%
+  full_join(harvest) %>%
+  mutate(WUE = CumDry_Harvest/CumSum_Loss) %>%
+  full_join(trial_key)
+
+level_harvest <- dates %>%
+  full_join(step2, multiple = "all") %>%
+  mutate(DAT = Date - TransplantDate)
+
+
+lh_means <- level_harvest %>%
+  group_by(PPFD,DAT) %>%
+  summarise(
+    mean = mean(WUE),
+    sd = sd(WUE),
+    n = length(WUE),
+    se = sd / sqrt(n),
+    WUE = mean
+  )
+
+
+
+
+lh_means %>%
+  ggplot(aes(x = DAT, y = WUE, fill = PPFD,
+             color= PPFD))+
+    # stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75,
+    #           alpha = 0.8, se = F)+
+  geom_line(linewidth = 0.8, alpha = 0.5)+
+  geom_point(size = 2.8)+
+  geom_errorbar(
+    width= 0.05,
+    aes(ymin = WUE - se,
+    ymax = WUE + se))+
+   theme_bw()+
+  scale_fill_npg()+
+  scale_color_npg()+
+  ylim(0,3)+
+  theme(
+    axis.title.y = element_text(margin = margin(r = 20)),
+    axis.title.x = element_text(margin = margin(t = 20)))+
+  ylab("Dry canopy (g) / Transpiration (L)")
+
+
+
+```
+
+
+
+# CCI & ACI
+```{r}
+
+#NS trial data
+acci_raw <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Pigments",
+              col_types = c("c")) %>%
+    mutate_at(vars(7:9, Tray), as.numeric) %>%
+    mutate_at(vars(Date), lubridate::as_date)
+
+
+acci <- acci_raw %>%
+  full_join(trial_key) %>%
+  mutate(
+    DAT = Date - TransplantDate
+  ) %>%
+  mutate_at(vars(PPFD,NSMS,DAT),as.factor)
+
+
+attach(acci)
+
+mod <- lm(ACI ~ NSMS*PPFD)
+
+summary(mod)
+anova(mod)
+
+TukeyHSD(aov(mod), conf.level = 0.95)
+plot(TukeyHSD(aov(mod), conf.level = 0.95))
+
+
+mod_means_contr <- emmeans::emmeans(object = mod,
+                                    pairwise ~ "PPFD+NSMS",
+                                    adjust = "tukey")
+
+mod_means <- multcomp::cld(object = mod_means_contr$emmeans,
+                           Letters = letters)
+
+#Plot mean
+ggplot(data = mod_means,
+       aes(x =  PPFD, y = emmean, fill = NSMS)) +
+  # geom_errorbar(aes(ymin = lower.CL, 
+  #                   ymax = upper.CL), 
+  #               width = 0.2) +
+  geom_bar(stat = "identity", position = position_dodge(0.5),
+           width = 0.5, alpha = 0.8) +
+  geom_text(aes(label = gsub(" ", "", .group)),
+            position = position_dodge(0.5),
+            vjust = -1.5,
+            color = "black")+
+  ylab("Anthocyanin Content Index")+
+  theme_bw()+
+  scale_fill_viridis_d()+
+  ylim(0,10)+
+  theme(
+    axis.title.y = element_text(margin = margin(r = 20)),
+    axis.title.x = element_text(margin = margin(t = 20)))
+
+
+
+acci_long <- acci %>%
+  pivot_longer(
+    c(7:9),
+    names_to = "metric",
+    values_to = 'value'
+  )
+
+means <- acci_long %>%
+  group_by(PPFD,NSMS,DAT, metric) %>%
+  summarise(
+    mean = mean(value),
+    sd = sd(value),
+    n = length(value),
+    se = sd / sqrt(n),
+    value = mean
+  ) %>%
+  drop_na(value)
+
+
+acci_long %>%
+  ggplot(aes(x = DAT, y = value, color = NSMS,
+             fill = NSMS))+
+  geom_jitter(alpha = 0.1, size = 2, shape = 20)+
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75,
+              alpha = 0.2) +
+  scale_fill_viridis_d()+
+  scale_color_viridis_d()+
+  theme_bw()+
+  theme(
+    axis.title.y = element_text(margin = margin(r = 15),
+                                size = 14),
+    axis.title.x = element_text(margin = margin(t = 15),
+                                size = 14))+
+  facet_grid(metric ~ PPFD, scales = 'free')+
+  ylab("Value")+
+  theme(panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 12,
+                                face = "bold",
+                                color = "white"))
+
+```
+
+
+# Nutrient Results
+```{r}
+
+ ns_results <- googlesheets4::read_sheet(
+    "1bw0GWZI7nA_Xz6rozvD2Z-78atfNM4d-BqGzRtKJh5Q",
+    sheet = "Solution Results",
+    col_types = c("c"))%>%
+    pivot_longer(
+      -c(1:12),
+      names_to = "Nutrient",
+      values_to = "Measured_mgL") %>%
+    dplyr::filter(!Nutrient == "SO4",
+                  Trial == "3",
+                  Timepoint == "5") %>%
+  mutate(
+    Measured_mgL = as.numeric(Measured_mgL),
+    Code = case_when(
+      NSMS == "1" ~ "CTRL",
+      NSMS == "2" ~ "FULL",
+      NSMS == "3" ~ "EC",
+      NSMS == "4" ~ "HALF",
+      NSMS == "5" ~ "WUE",
+      NSMS == "6" ~ "LAB"),
+    Code = fct_relevel(Code, "CTRL",'FULL','HALF',
+                       'EC','WUE','LAB')
+  )
+
+
+ns_PPFD_means <- ns_results %>%
+  group_by(PPFD,Nutrient) %>%
+  summarise(
+    mean = mean(Measured_mgL),
+    sd = sd(Measured_mgL),
+    n = length(Measured_mgL),
+    se = sd / sqrt(n)
+  )
+
+```
+
+### Plot NS
+
+```{r}
+
+ns_targets <-  googlesheets4::read_sheet(
+    "1bw0GWZI7nA_Xz6rozvD2Z-78atfNM4d-BqGzRtKJh5Q",
+    sheet = "Solution Targets",
+    col_types = c("c"))
+
+
+combined_nutes <- ns_results %>%
+    full_join(ns_targets) %>%
+    mutate_at(vars(Measured_mgL, Target_mgL), as.numeric) %>%
+    filter(Trial == "3",
+           !NSMS == "0",
+           Timepoint == "5") %>%
+    group_by(PPFD,Code,Nutrient) %>%
+    reframe(
+      mean = mean(Measured_mgL),
+      target = mean(Target_mgL),
+      sd = sd(Measured_mgL),
+      n = length(Measured_mgL),
+      se = sd / sqrt(n)
+    )
+  
+  
+macro_nutes <- combined_nutes %>%
+  filter(Nutrient %in% c('NH4-N','NO3-N','P','K'))
+
+micro_nutes <- combined_nutes %>%
+  filter(!Nutrient %in% c('NH4-N','NO3-N','P','K'))
+
+plot <- macro_nutes %>%
+  ggplot(aes(x = Code, y = mean,
+              fill = PPFD)) +
+  geom_hline(data = macro_nutes, aes(yintercept = target),
+              color = "green", linetype = "solid", linewidth = 10, alpha = 0.2) +
+  geom_hline(data = macro_nutes, aes(yintercept = target),
+              color = "black", linetype = "dotted", linewidth = 0.5, alpha = 0.8
+             ) +
+  geom_errorbar(aes(ymin = mean - se,
+                    ymax = mean + se),
+                width = 0.2,  position = position_dodge(0.5),
+                color = 'black') +
+ ylab("Nutrient ppm")+
+ theme_bw()+
+ scale_fill_npg()+
+  theme(
+    axis.title.x = element_text(margin = margin(t = 20),
+                                 size = 16,
+                                face = "bold"),
+    axis.text.x = element_text(margin = margin(t = 10),
+                               angle = 45,
+                               size = 10,
+                               face = "bold"),
+    panel.grid.major = element_blank(),
+        panel.spacing = unit(1.8, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.y = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.0)))+
+  ylab("Nutrient Solution Concentration (PPM)")+
+  xlab("NSMS")+
+  geom_bar(stat = "identity", position = position_dodge(0.5),
+           width = 0.5, alpha = 0.8)+
+  facet_wrap(~Nutrient, scales = "free")
+
+plotly::ggplotly(plot)
+  
+
+```
+
+### NS Mods
+```{r}
+
+ns_mod <- ns_results %>%
+  mutate_at(vars(PPFD,NSMS), as.factor) %>%
+  mutate_at(vars(Measured_mgL), as.numeric)%>%
+  filter(#Nutrient == "NO3-N",
+         Timepoint == "5")
+
+attach(ns_mod)
+
+#Test multiple models
+ns_aov <- ns_mod %>%
+    group_by(Nutrient) %>%
+    nest() %>%
+    mutate(aov = list(aov(Measured_mgL ~ PPFD*NSMS, data = data))) 
+
+summarise(broom::tidy(ns_aov))
+
+mod <- lm(Measured_mgL ~ PPFD+NSMS)
+anova(mod)
+
+anova <- aov(Measured_mgL ~ PPFD+NSMS)
+tukey <- TukeyHSD(anova)
+cld<- multcompView::multcompLetters4(anova,tukey)
+
+ns_mod_tk <- ns_mod %>%
+    group_by(Code) %>%
+    summarise(mean = mean(Measured_mgL, na.rm=T),
+              quant = quantile(Measured_mgL, probs = 0.75, na.rm=T)) %>%
+    arrange(desc(mean))
+
+# extracting the compact letter display and adding to the Tk table
+cld <- as.data.frame.list(cld$NSMS)
+ns_mod_tk['cld'] = cld$Letters
+
+
+
+
+
+#Plot mean
+ns_mod %>%
+  mutate(mean = Measured_mgL)%>%
+ggplot(aes(x = Code, y = mean, color = Code)) +
+  #geom_boxplot(size = 1)+
+  geom_errorbar(data = ns_mod_tk,
+    aes(ymin = mean - se,
+        ymax = mean +se),
+    position = position_dodge(0.5),
+    width = 0.2, color = "black", linewidth = 1) +
+  geom_bar(stat = "identity", position = position_dodge(0.5),
+           width = 0.5) +
+  geom_jitter(width = 0.1,
+              alpha = 0.2, size = 2, shape = 20)+
+  geom_text(
+    data = ns_mod_tk,
+    aes(label = cld, y = quant),
+    color = "black",
+    face = "bold",
+    vjust = -0.75,
+    hjust = -0.75,
+    size = 6)+
+   scale_color_npg()+
+  scale_fill_npg()+
+  #theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      axis.text.x = element_blank(),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "bottom")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.0)))+
+  ylab("Fresh Canopy Biomass (g)")+
+  scale_y_continuous(breaks = scales::breaks_pretty(5))
+
+
+
+```
+
+### Plot TS
+```{r}
+
+ ts_results <- googlesheets4::read_sheet(
+    "1bw0GWZI7nA_Xz6rozvD2Z-78atfNM4d-BqGzRtKJh5Q",
+    sheet = "Tissue Results",
+    col_types = c("c")) %>%
+    dplyr::select(c(1:21), -11) %>%
+    pivot_longer(
+      -c(1:9),
+      names_to = "Nutrient",
+      values_to = "Measured") %>%
+  full_join(trial_key) %>%
+  dplyr::filter(Trial == "3")%>%
+  mutate(
+    Code = case_when(
+      NSMS == "1" ~ "CTRL",
+      NSMS == "2" ~ "FULL",
+      NSMS == "3" ~ "EC",
+      NSMS == "4" ~ "HALF",
+      NSMS == "5" ~ "WUE",
+      NSMS == "6" ~ "LAB"),
+    Code = fct_relevel(Code, "CTRL",'FULL','HALF',
+                       'EC','WUE','LAB')
+  )
+
+
+  #load nutrient solution targets
+ts_targets <-  googlesheets4::read_sheet(
+    "1bw0GWZI7nA_Xz6rozvD2Z-78atfNM4d-BqGzRtKJh5Q",
+    sheet = "Tissue Targets",
+    col_types = c("c"))
+
+  
+combined_nutes <- ts_results %>%
+    full_join(ts_targets) %>%
+    mutate_at(vars(Measured, Target), as.numeric) %>%
+    mutate(
+     Nutrient = fct_relevel(Nutrient,
+                           'N','P','K','Ca',
+                           'Mg','S','B','Zn',
+                           'Mn','Fe','Cu'),
+  hort_low = case_when(
+    Nutrient == "N" ~ 3.75,
+    Nutrient == "P" ~ 0.45,
+    Nutrient == "K" ~ 3.00,
+    Nutrient == "Ca" ~ 1.25,
+    Nutrient == "Mg" ~ 0.45,
+    Nutrient == "S" ~ 0.25,
+    Nutrient == "Fe" ~ 50,
+    Nutrient == "Mn" ~ 55,
+    Nutrient == "Zn" ~ 25,
+    Nutrient == "Cu" ~ 6,
+    Nutrient == "B" ~ 15,
+    Nutrient == "Mo" ~ 0.33),
+  hort_high = case_when(
+    Nutrient == "N" ~5.6,
+    Nutrient == "P" ~0.77,
+    Nutrient == "K" ~6.5,
+    Nutrient == "Ca" ~2.5,
+    Nutrient == "Mg" ~0.78,
+    Nutrient == "S" ~0.35,
+    Nutrient == "Fe" ~150,
+    Nutrient == "Mn" ~110,
+    Nutrient == "Zn" ~60,
+    Nutrient == "Cu" ~16,
+    Nutrient == "B" ~45,
+    Nutrient == "Mo" ~0.58),
+    ppm = ifelse(
+    Nutrient %in% c("N",'P','K','Ca','Mg','S'),
+                       "  (%)","  (ppm)"),
+    Nutrient = paste0(Nutrient,ppm),
+       Nutrient = fct_relevel(Nutrient,
+                           'N  (%)','P  (%)','K  (%)',
+                           'Ca  (%)','Mg  (%)',
+                           'S  (%)','B  (ppm)','Zn  (ppm)',
+                           'Mn  (ppm)','Fe  (ppm)',
+                           'Cu  (ppm)'),)%>%
+    filter(Trial == "3",
+           !NSMS == "0")
+
+
+nute_means <- combined_nutes %>%
+  group_by(Nutrient, Code, Target) %>%
+  summarise(
+      mean = mean(Measured),
+      Percent_diff = round((mean(Measured)-mean(Target))/mean(Target)*100,0)
+    ) %>%
+  mutate(
+  Micro_Macro = ifelse(
+     Nutrient %in% c("N",'P','K','Ca','Mg','S'),
+                       "Macro","Micro"),
+  hort_low = case_when(
+    Nutrient == "N" ~ 3.75,
+    Nutrient == "P" ~ 0.45,
+    Nutrient == "K" ~ 3.00,
+    Nutrient == "Ca" ~ 1.25,
+    Nutrient == "Mg" ~ 0.45,
+    Nutrient == "S" ~ 0.25,
+    Nutrient == "Fe" ~ 50,
+    Nutrient == "Mn" ~ 55,
+    Nutrient == "Zn" ~ 25,
+    Nutrient == "Cu" ~ 6,
+    Nutrient == "B" ~ 15,
+    Nutrient == "Mo" ~ 0.33),
+  hort_high = case_when(
+    Nutrient == "N" ~5.6,
+    Nutrient == "P" ~0.77,
+    Nutrient == "K" ~6.5,
+    Nutrient == "Ca" ~2.5,
+    Nutrient == "Mg" ~0.78,
+    Nutrient == "S" ~0.35,
+    Nutrient == "Fe" ~150,
+    Nutrient == "Mn" ~110,
+    Nutrient == "Zn" ~60,
+    Nutrient == "Cu" ~16,
+    Nutrient == "B" ~45,
+    Nutrient == "Mo" ~0.58))
+
+
+nute_means %>%
+  filter(!Nutrient %in% c("N","P","K")) %>%
+  ggplot(aes(x = Code, y = mean, color = Code,
+             fill = Code))+
+  geom_bar(stat = "identity")+
+  facet_wrap(~Nutrient, scales = "free") +
+  geom_hline(aes(yintercept = Target),
+              color = "black", linetype = "solid",
+             linewidth = 10, alpha = 0.1) +
+  geom_hline(aes(yintercept = Target),
+              color = "black", linetype = "dotted",
+             linewidth = 1, alpha = 0.8
+             ) +
+  geom_hline(aes(yintercept = Target2),
+              color = "black", linetype = "dotted",
+             linewidth = 1, alpha = 0
+             ) +
+  geom_text(
+    aes(label = Percent_diff, y = mean),
+    color = "black",
+    vjust = -1,
+    hjust = 0.2,
+    size = 5)+
+   scale_color_npg()+
+  scale_fill_npg()+
+  #theme_bw()+
+theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(r = 25)),
+        axis.text.y = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold"),
+        axis.text.x = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold",
+         angle = 45),
+        legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "none")+
+     guides(colour = guide_legend(
+       nrow = 1,
+     override.aes = list(size = 1.0)))+
+  ylab("Leaf % Sulfur")
+
+
+
+combined_nutes %>%
+  mutate(Target2 = Target+(Target/3))%>%
+  filter(!Nutrient %in% c("N  (%)","P  (%)","K  (%)")) %>%
+  ggplot(aes(x = Code, y = Measured, color = Code,
+              shape = PPFD))+
+  geom_rect(aes(xmin = -Inf, xmax = Inf,
+            ymin = hort_low,ymax = hort_high),
+            fill = "green", alpha = 0.005, color = NA)+
+  geom_hline(aes(yintercept = hort_low), linetype = "dotted",
+            linewidth = 0.6, color = "darkgreen", alpha = 0.7)+
+  geom_hline(aes(yintercept = hort_high), linetype = "dotted",
+            linewidth = 0.6, color = "darkgreen", alpha = 0.7)+
+  geom_hline(aes(yintercept = hort_low-hort_low),
+             linetype = "dotted",
+            linewidth = 1, color = "white", alpha = 0)+
+  geom_hline(aes(yintercept = hort_high+hort_high),
+             linetype = "dotted",
+            linewidth = 1, color = "white", alpha = 0)+
+  geom_jitter(stat = "identity", size = 3)+
+  facet_wrap(~Nutrient, scales = "free") +
+theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(r = 25)),
+        axis.text.y = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold"),
+        axis.text.x = element_blank(),
+        legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+       ncol = 1,
+       title = "NSMS",
+     override.aes = list(size = 2.0)))+
+  ylab("Leaf nutrient content")+
+     scale_color_npg()+
+  scale_fill_npg()
+
+
+nesting_nutes <- combined_nutes %>%
+  group_by(Nutrient) %>%
+  nest() %>%
+  mutate(data = map(data, ~ .x %>%
+    pivot_wider(
+    names_from = Code,
+    values_from = mean
+  ))) %>%
+  unnest(cols = c(data)) %>%
+  arrange(Nutrient)
+
+
+
+
+
+nutesm <- combined_nutes %>%
+  mutate_at(vars(PPFD,Code), as.factor)
+
+
+library(agricolae)
+
+
+groupers <- nutesm %>%
+  group_by(Nutrient) %>%
+  nest() %>%
+  mutate(anova = map(data, ~aov(Measured ~ Code*PPFD,.)),
+         tukey = map(data, ~TukeyHSD(aov(Measured ~ Code*PPFD,.))),
+         tidy = map(tukey,broom::tidy)) %>%
+  select(Nutrient, tidy) %>%
+  unnest(cols = tidy) %>%
+  mutate(
+    adj.p.value = round(adj.p.value,3)
+  ) %>%
+  drop_na(adj.p.value) %>%
+  filter(adj.p.value < 0.05)
+
+  
+groupers2 <- nutesm %>%
+  group_by(Nutrient) %>%
+  nest() %>%
+  mutate(anova =  map(data, ~aov(Measured ~ Code*PPFD,.)),
+         tukey = map(data, ~TukeyHSD(aov(Measured ~ Code*PPFD,.)))) %>%
+  map(multcompView::multcompLetters4(anova,tukey))
+  select(Nutrient,tidy,tukey,cld) %>%
+  unnest(cols = tidy) %>%
+  mutate(
+    adj.p.value = round(adj.p.value,3)
+  ) %>%
+  drop_na(adj.p.value)
+
+nutesm <- combined_nutes %>%
+  mutate_at(vars(PPFD,Code), as.factor) %>%
+  filter(Nutrient == "S")
+
+attach(nutesm)
+mod <- lm(Measured ~ Code*PPFD)  
+anova(mod)
+
+
+anova <- aov(Measured ~ Code*PPFD)
+tukey <- TukeyHSD(anova)
+
+cld<- multcompView::multcompLetters4(anova,tukey)
+
+cld <- as.data.frame.list(cld$`Code:PPFD`) %>%
+  tibble::rownames_to_column(var = "ID") %>%
+  separate(ID, into = c("Code", "PPFD")) %>%
+  select(Code,PPFD,Letters)
+
+
+
+nutes_tk <- nutesm %>%
+    group_by(Code,PPFD,Target) %>%
+    summarise(mean = mean(Measured , na.rm=T),
+              quant = quantile(Measured, probs = 0.75, na.rm=T),
+              sd = sd(Measured),
+              n = length(Measured),
+              se = sd / sqrt(n)) %>%
+   full_join(cld) %>%
+  ungroup() %>%
+  mutate( Code = fct_relevel(Code, "CTRL",'FULL','HALF',
+                       'EC','WUE','LAB'))
+    
+
+
+
+
+#Plot mean
+nutes_tk %>%
+ggplot(aes(x = Code, y = mean, color = Code,
+           fill = Code)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  geom_errorbar(
+    data = nutes_tk,
+    aes(ymin = mean - se,
+        ymax = mean +se),
+    width = 0.2, color = "black",
+    linewidth = 0.6) +
+  geom_hline(aes(yintercept = Target),
+              color = "black", linetype = "solid",
+             linewidth = 10, alpha = 0.1) +
+  geom_hline(aes(yintercept = Target),
+              color = "black", linetype = "dotted",
+             linewidth = 1, alpha = 0.8
+             ) +
+  geom_text(
+    data = nutes_tk,
+    aes(label = Letters, y = quant),
+    color = "black",
+    vjust = -1,
+    hjust = 0.2,
+    size = 5)+
+  facet_grid(~PPFD)+
+   scale_color_npg()+
+  scale_fill_npg()+
+  #theme_bw()+
+theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(r = 25)),
+        axis.text.y = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold"),
+        axis.text.x = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold",
+         angle = 45),
+        legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "none")+
+     guides(colour = guide_legend(
+       nrow = 1,
+     override.aes = list(size = 1.0)))+
+  ylab("Leaf % Sulfur")+
+  scale_y_continuous(breaks = scales::breaks_pretty(5),
+                       limits = c(0,0.6))
+
+
+
+
+
+
+
+  
+macro_nutes <- combined_nutes %>%
+  filter(Nutrient %in% c('N','P','K','Ca'))
+
+macro_nutes %>%
+  ggplot(aes(x = Code, y = mean,
+              fill = PPFD)) +
+  geom_hline(data = macro_nutes, aes(yintercept = target),
+              color = "green", linetype = "solid", linewidth = 10, alpha = 0.2) +
+  geom_hline(data = macro_nutes, aes(yintercept = target),
+              color = "black", linetype = "dotted", linewidth = 0.5, alpha = 0.8
+             ) +
+  geom_errorbar(aes(ymin = mean - se,
+                    ymax = mean + se),
+                width = 0.2,  position = position_dodge(0.5),
+                color = 'black') +
+ ylab("Nutrient ppm")+
+ theme_bw()+
+ scale_fill_npg()+
+  theme(
+    axis.title.x = element_text(margin = margin(t = 20),
+                                 size = 16,
+                                face = "bold",),
+    axis.text.x = element_text(margin = margin(t = 10),
+                               angle = 45,
+                               size = 10,
+                               face = "bold"),
+    panel.grid.major = element_blank(),
+        panel.spacing = unit(1.8, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.y = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.0)))+
+  ylab("Nutrient Solution Concentration (PPM)")+
+  xlab("NSMS")+
+  geom_bar(stat = "identity", position = position_dodge(0.5),
+           width = 0.5, alpha = 0.8)+
+  facet_wrap(~Nutrient, scales = "free")
+
+  
+
+```
+
+# Creating Molar Solutions
+```{r}
+
+
+fertilizer_grades <- googlesheets4::read_sheet(
+    "1q4IZO6lQu-O8OWxk_yrDpp491L4E34AzTk-5W5Ieqfk",
+              sheet = "Fertilizer Grades",
+              col_types = c("c")) %>%
+  pivot_longer(
+    -c(1:3),
+    names_to = "Nutrient",
+    values_to = "Percent_Grade"
+  ) %>%
+  mutate(
+    Percent_Grade = as.numeric(Percent_Grade)
+  )
+
+
+fertilizer_solubility <- googlesheets4::read_sheet(
+    "1q4IZO6lQu-O8OWxk_yrDpp491L4E34AzTk-5W5Ieqfk",
+    sheet = "Fertilizer Solubility",
+    col_types = c("c")) %>%
+    dplyr::select(c(1:6))
+
+
+
+```
+
+
+# Gas Exchange
+```{r}
+
+ciras <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "CIRAS",
+              col_types = c("c")) %>%
+    mutate_at(vars(CIRAS_Log,Tcuv,gs,A,E,WUE,phiPSII,J), as.numeric) %>%
+  dplyr::select(CIRAS_Log, A,gs,phiPSII,J)
+
+
+sampling_key <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Sampling",
+              col_types = c("c"))%>%
+    mutate_at(vars(CIRAS_Log, Tray), as.numeric) %>%
+  drop_na(CIRAS_Log) %>%
+  dplyr::select(CIRAS_Log,NSMS,PPFD)
+
+ciras_joined <- ciras %>%
+  full_join(sampling_key) %>%
+  mutate(
+    PPFD = paste0(PPFD," PPFD"),
+    Code = case_when(
+      NSMS == "1" ~ "CTRL",
+      NSMS == "2" ~ "FULL",
+      NSMS == "3" ~ "EC",
+      NSMS == "4" ~ "HALF",
+      NSMS == "5" ~ "WUE",
+      NSMS == "6" ~ "LAB"),
+    Code = fct_relevel(Code, "CTRL","FULL","HALF","EC",
+                                     "WUE","LAB")) %>%
+  mutate_at(vars(PPFD,NSMS), as.factor) %>%
+  slice(-56) 
+  filter(PPFD == "500 PPFD")
+
+
+attach(ciras_joined)
+
+shapiro.test(ciras_joined$gs)
+
+mod <- lm(phiPSII ~ Code+PPFD)
+anova(mod)
+
+kruskal.test(gs ~ Code)
+pairwise.wilcox.test(gs,Code, p.adjust.method = "BH")
+
+performance::check_normality(mod)
+
+
+summary(mod)
+anova(mod)
+
+anova <- aov(phiPSII ~ PPFD*Code)
+tukey <- TukeyHSD(anova,conf.level = 0.95)
+cld<- multcompView::multcompLetters4(anova,tukey)
+
+ciras_tk <- ciras_joined %>%
+    group_by(PPFD,Code) %>%
+    summarise(mean=mean(phiPSII, na.rm=T),
+              quant = quantile(phiPSII,
+                               probs = 0.75,
+                               na.rm=T)) %>%
+    arrange(desc(mean)) %>%
+    mutate(emmean = mean)
+
+# extracting the compact letter display and adding to the Tk table
+cld <- as.data.frame.list(cld$`PPFD:Code`)
+ciras_tk['cld'] = cld$Letters
+
+
+#Plot mean
+ciras_joined %>%
+  mutate(emmean = phiPSII)%>%
+ggplot(aes(x = Code, y = emmean, color = Code)) +
+  geom_boxplot(size = 1)+
+  facet_wrap(~PPFD)+
+  # geom_errorbar(aes(ymin = emmean - se,
+  #                   ymax = emmean +se),
+  #               position = position_dodge(0.5),
+  #               width = 0.2, color = "black",
+  #               linewidth = 1) +
+  # geom_bar(stat = "identity", position = position_dodge(0.5),
+  #          width = 0.5) +
+  geom_jitter(width = 0.1,
+              alpha = 0.2, size = 2, shape = 20)+
+  geom_text(
+    data = ciras_tk,
+    aes(label = cld, y = quant),
+    color = "black",
+    vjust = -0.45,
+    hjust = -0.25,
+    size = 5)+
+   scale_color_npg()+
+  scale_fill_npg()+
+  #theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.x = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(t = 25)),
+        axis.text.x = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold",
+         angle = 45),
+        axis.title.y = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(r = 25)),
+       axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "none")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.0)))+
+  ylab("phiPSII")+
+  xlab("LI")+
+  scale_y_continuous(breaks = scales::breaks_pretty(5))
+
+
+```
+

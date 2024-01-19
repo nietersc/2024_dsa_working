@@ -1,0 +1,27 @@
+{
+    "id": "53827EAE",
+    "path": "~/2024 Spring/CRSS 8220/2024_dsa_working/02-wrangling/code/01-16_datawrangling-partial.Rmd",
+    "project_path": "code/01-16_datawrangling-partial.Rmd",
+    "type": "r_markdown",
+    "hash": "0",
+    "contents": "",
+    "dirty": true,
+    "created": 1705589429904.0,
+    "source_on_save": false,
+    "relative_order": 2,
+    "properties": {
+        "chunk_output_type": "console",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "243,143",
+        "scrollLine": "224"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1705589410,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1705593115124,
+    "read_only": false,
+    "read_only_alternatives": []
+}
