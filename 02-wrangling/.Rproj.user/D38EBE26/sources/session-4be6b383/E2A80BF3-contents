@@ -68,11 +68,12 @@ soyk_2
 
 ```
 
+
 ```{r soyk_3 - mutate()}
 
 # Transforming K rate from lbs/ac to kg/ha
 soyk_3  <- soyk_1 |>
-  mutate(
+  dplyr::mutate(
     k_rate_kgha = round(k_rate_lbac*0.454/0.405,0)
     )
 
@@ -80,8 +81,18 @@ soyk_3
 
 ```
 
+
 ```{r soyk_4 - case_when()}
-soyk_4 
+
+soyk_4 <- soyk_3 |>
+  mutate(
+    rep = case_when(
+      plot %in% c(100:199) ~ 1,
+      plot %in% c(200:299) ~ 2,
+      plot %in% c(300:399) ~ 3,
+      plot %in% c(400:499) ~ 4
+    )
+  )
 
 soyk_4
 
@@ -90,7 +101,12 @@ soyk_4
 ```{r soyk_5 - pivot_longer()}
 names(soyk_4)
 
-soyk_5 
+soyk_5 <- soyk_4 |>
+  pivot_longer(
+    cols = contains("k_pct"),
+    names_to = "location.k",
+    values_to = "k_pct",
+  )
 
 soyk_5
 
@@ -98,30 +114,47 @@ View(soyk_5)
 ```
 
 ```{r soyk_6 - separate()}
-soyk_6 
+
+
+soyk_6 <- soyk_5 |>
+  separate(col = location.k,
+           sep ="_",
+           into  = c("location","k","pct"))
 
 soyk_6
 
 View(soyk_6)
+
 ```
+
 
 ```{r soyk_7 - select()}
+
 names(soyk_6)
 
-soyk_7 
+soyk_7 <- soyk_6 |>
+  dplyr::select(location,rep,k_rate_kgha,k_pct,) 
 
 soyk_7
+
 ```
 
+
 ```{r soyk_8 - arrange()}
-soyk_8 
+
+soyk_8  <- soyk_7 |>
+  arrange(desc(rep))
 
 soyk_8
+
 ```
 
 ```{r soyk_9 and 10 - group_by and summarise}
+
 # group_by
-soyk_9 
+soyk_9  <- soyk_8 |>
+  group_by(location)
+ 
 
 soyk_9
 
@@ -130,27 +163,60 @@ class(soyk_8)
 class(soyk_9)
 
 # summarise
-soyk_10 
+
+soyk_10 <- soyk_9 |>
+  summarise(
+    meank_pct = mean(k_pct, na.rm = T),
+    sd = sd(k_pct, na.rm = T),
+    n = length(k_pct),
+    se = sd / sqrt(n)
+  )
 
 soyk_10
+
 ```
 
 ```{r Piping it all together}
-soyk_w 
 
+soyk_w <- soyk |>
+  clean_names() |>
+  mutate(
+    k_rate_kgha = round(k_rate_lbac*0.454/0.405,0)
+    )|>
+  mutate(
+    rep = case_when(
+      plot %in% c(100:199) ~ 1,
+      plot %in% c(200:299) ~ 2,
+      plot %in% c(300:399) ~ 3,
+      plot %in% c(400:499) ~ 4
+    ))|>
+  pivot_longer(
+    cols = contains("k_pct"),
+    names_to = "location.k",
+    values_to = "k_pct",
+  )|>
+  separate(col = location.k,
+           sep ="_",
+           into  = c("location","k","pct"))|>
+  dplyr::select(location,rep,k_rate_kgha,k_pct,)|>
+  arrange(desc(rep))
+
+  
 soyk_w
-
 
 ```
 
 ```{r Checking if same as without pipe}
 # Same result?
-identical(soyk_7, soyk_w)
+identical(soyk_8, soyk_w)
 
 ```
 
 ```{r Saving to file for further analysis}
 
+soyk_w |> saveRDS(file = "data/soyk_w.RDS")
+
+pull <- readRDS("data/soyk_w.RDS")
 
 ```
 
@@ -158,13 +224,25 @@ identical(soyk_7, soyk_w)
 Starting from soyk, use data wrangling functions in a pipe workflow to generate the average k_pct for each K rate (in kg/ha) within each location (basically, averaging over reps). You can use the chunk below to complete this quiz.
 
 ```{r assignment}
-soyk 
+
+soyk_assignment <- soyk_w |>
+    group_by(location, k_rate_kgha)|>
+  summarise(
+    meank_pct = mean(k_pct, na.rm = T),
+    sd = sd(k_pct, na.rm = T),
+    n = length(k_pct),
+    se = sd / sqrt(n)
+  )
+
+
+soyk_assignment |> write.csv(file = "data/soyk_assignment.csv")
+
 ```
 
 
 Tip: the final data frame will have 16 rows.
 
-Submit your result (copy the table from the chunk output, paste it in the email body) to me by email (lmbastos@uga.edu) by Wednesday Jan 17th 11:59 pm.
+Submit your result (copy the table from the chunk output, paste it in the email body) to me by email (lmbastos@uga.edu) by Tues Jan 23th 9:00 am.
 
 
 
