@@ -11,15 +11,14 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
-install.packages("gitignore")
 library(gitignore)
-install.packages("devtools")
-devtools::install_github("ropensci/gitignore")
 library(devtools)
+library(here)
 
 
-f <- file.path(tempdir(), ".gitignore")
+f <- file.path(here::here(), ".gitignore")
 new_lines <- gi_fetch_templates("r")
 gi_write_gitignore(fetched_template = new_lines, gitignore_file = f)
+
 
 ```
