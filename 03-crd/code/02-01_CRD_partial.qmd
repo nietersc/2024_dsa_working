@@ -19,7 +19,6 @@ The goals of this exercise are to:
 # a) Setup  
 Here is where we load the packages we will use.  
 ```{r setup}
-#install.packages("broom")
 
 # Loading packages
 library(tidyverse) # for data wrangling and plotting
@@ -27,28 +26,58 @@ library(car) # for Anova function
 library(broom) # for model residuals extraction
 library(emmeans) # for model mean extraction
 library(multcomp) # for pairwise comparison letter display
+library(multcompView)
+
 ```
 
 ```{r data import}
+
 crd_df <- read.csv("data/wheat_nk_balkh.csv")
 
-crd_df
+crd_df1 <- crd_df |>
+  mutate(
+    trt_name = paste0(krate_kgha,"+",nrate_kgha)
+  )|>
+  pivot_longer(
+    c(3:4),
+    names_to = "nutrient",
+    values_to = "rate_kgha"
+  )|>
+  separate(
+    nutrient,
+    into = c("nutrient","remove"),
+    sep = "_"
+  )|>
+  dplyr::select(-remove) |>
+  dplyr::mutate(
+    element = case_when(
+      grepl(x = nutrient, pattern = "k") ~ "k",
+      grepl(x = nutrient, pattern = "n") ~ "n"
+    )
+  )|>
+  mutate_at(vars(rate_kgha,rep), as.factor)
+
 ```
 
 # b) EDA tables  
 ```{r summary}
+
 summary(crd_df)
+
 ```
 
 ```{r glimpse}
+
 glimpse(crd_df)
+
 ```
 
 # c) Wrangling  
 ```{r crd_dfw}
-crd_dfw <- crd_df 
+  
 
 crd_dfw
+
 ```
 
 
@@ -62,6 +91,15 @@ Yield: from 2795 to 7445 kg/ha
 
 # d) EDA plots  
 ```{r n boxplot}
+
+crd_df1|>
+  ggplot(aes(x = rate_kgha, y = yield_kgha,
+             color = trt_name))+
+  geom_boxplot()+
+  geom_jitter(alpha = 0.4)
+  # theme(
+  #   legend.position = "none"
+  # )
 
 ```
 
