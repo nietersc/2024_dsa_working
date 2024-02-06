@@ -76,7 +76,12 @@ glimpse(crd_df)
 ```{r crd_dfw}
   
 
-crd_dfw
+crd_dfw <- crd_df |>
+  mutate_at(
+    vars(krate_kgha,nrate_kgha,rep), as.factor)|>
+  mutate(
+    trt_name = paste0(krate_kgha,"+",nrate_kgha)
+  )
 
 ```
 
@@ -92,45 +97,59 @@ Yield: from 2795 to 7445 kg/ha
 # d) EDA plots  
 ```{r n boxplot}
 
-crd_df1|>
-  ggplot(aes(x = rate_kgha, y = yield_kgha,
-             color = trt_name))+
+crd_dfw|>
+  ggplot(aes(x = nrate_kgha, y = yield_kgha,
+             color = nrate_kgha))+
   geom_boxplot()+
-  geom_jitter(alpha = 0.4)
-  # theme(
-  #   legend.position = "none"
-  # )
+  geom_jitter(alpha = 0.4)+
+  theme(
+    legend.position = "none"
+  )
 
 ```
 
 ```{r k boxplot}
+
 ggplot(crd_dfw, aes(x = krate_kgha, 
                     y = yield_kgha,
                     color = krate_kgha)) +
   geom_boxplot() +
   geom_jitter() +
   theme(legend.position = "none")
+
 ```
 
 ```{r nk boxplot}
+
+crd_dfw |>
+  ggplot(aes(x = nrate_kgha, y = yield_kgha,
+             color = nrate_kgha,))+
+  geom_boxplot()+
+  geom_jitter()+
+  facet_grid(~krate_kgha)
 
 ```
 
 # e) Statistical model  
 ## Set-to-zero vs. sum-to-zero  
-In R, the default contrast type is set-to-zero.  
+***In R, the default contrast type is set-to-zero.***  
 
 In research, we normally are interested in sum-to-zero contrasts.  
 
 Below we change the default to sum-to-zero ("contr.sum") before fitting the model.
+
+Notes on contrasts: issues with matrices -> matrix may not be resolvable when inverting the matrix at a given step of calculations. 
 
 
 ```{r model}
 # Changing to sum-to-zero contrast
 options(contrasts = c("contr.sum", "contr.poly"))
 
+attach(crd_dfw)
 # Model fitting
-crd_mod 
+crd_mod <- lm(yield_kgha ~ nrate_kgha*krate_kgha) 
+
+crd_mod <- lm(yield_kgha ~ krate_kgha + nrate_kgha + krate_kgha:nrate_kgha)
 
 # Summary
 summary(crd_mod)
@@ -148,7 +167,7 @@ The more interacting effects a model has, the more efficient using the * becomes
 
 
 # f) ANOVA table  
-The `Anova()` function allows us to use **type 3 sum of squares**.  
+The `Anova()` function allows us to use **type 3 sum of squares**. **This is important as the ORDER of factors in the model matters if using Type I SS.** So - always use Type III to be safe. 
 
 The common functions `aov()` and `anova()` use type 1 SS, which is the wrong choice IF have unbalanced data.
 
@@ -157,6 +176,14 @@ If data is balanced, type 1 and 3 give same results.
 For sake of peace of mind, it is simpler to just always use type 3.  
 
 ```{r ANOVA}
+
+#Anova found in car package
+Anova(crd_mod, type = 3) #uses Type III SS - if you have missing data
+
+anova(crd_mod) #uses Type I SS
+
+aov(crd_mod) #uses Type I SS
+
 
 ```
 
@@ -173,22 +200,27 @@ Before we do that, let's check our model assumptions. Remember, a model is only 
 
 # g) Linear model assumptions  
 ## Extracting residuals
-First, let's extract our model residuals, and also create studentized residuals.  
+***First, let's extract our model residuals, and also create studentized residuals.***  
 
 ```{r crd_resid}
-crd_resid 
+
+crd_resid <- broom::augment(crd_mod) |>
+  mutate(
+    .stud_resid = rstudent(crd_mod)
+  )
 
 crd_resid
+
 ```
 
 Notice how we have a data frame with the original data rows and columns, plus some extra residual information.  
 
 Now, let's recap the linear model assumptions:  
 
-- Residual independence (no pattern)  
-- Residual variance homogeneity (homoscedasticity)  
-- Residual normality (discuss this!)  
-- Outlier detection (< -3 or > 3)  
+- 1) Residual independence (no pattern) - should be because we randomized
+- 2) Residual variance homogeneity (homoscedasticity)  
+- 3) Residual normality (discuss this!) - ***raw data normality is NOT an assumption of the model!!***
+- 4) Outlier detection (< -3 or > 3) - use studentized residuals (99% of data should lie in this range)  
 
 ## Residual independence  
 - For this, we use the **fitted vs. residual plot**.  
@@ -198,17 +230,33 @@ Now, let's recap the linear model assumptions:
 
 ```{r }
 
+crd_resid |>
+  ggplot(aes(x = .fitted, y = .stud_resid))+
+  geom_hline(yintercept = c(-3,0,3),
+             color = "red",
+             linewidth = 1,
+             alpha = 0.5)+
+  geom_smooth(color = "purple4", fill = "purple")+
+  geom_point(shape = 21,
+             fill = "purple",
+             size = 3,
+             alpha = 0.7)
+
 ```
 Looks great! Next.  
 
-## Residual homoscedasticity  
+## Residual homoscedasticity
+***This is a key assumption when looking at a linear relationship!***
 - For this, we use the **fitted vs. residual plot**.  
 - What we want to see: no clear pattern in residuals, random cloud of points.  
 - What we do not want to see: residuals increasing as fitted value increases (fan shape).  
-- Adding a `geom_smooth()` helps with that conclusion. We want to see the smooth line and error bands comprising 0 on the y axis.  
+- Adding a `geom_smooth()` helps with that conclusion. We want to see the smooth line and error bands comprising 0 on the y axis.
+
+***IF we do have heteroskedasticity, there are resources to deal with this (reach out to professor Bastos)***
 
 ```{r }
-ggplot(crd_resid, aes(x=.fitted, y=.studresid))+
+
+ggplot(crd_resid, aes(x=.fitted, y=.stud_resid))+
   geom_hline(yintercept = 0, color="red")+
   geom_point(shape = 21,
              fill = "purple", 
@@ -217,6 +265,7 @@ ggplot(crd_resid, aes(x=.fitted, y=.studresid))+
   geom_smooth()+
   geom_hline(yintercept = c(-3,3), color = "red")+
   theme_bw()
+
 ```
 Looks great! Next.  
 
@@ -228,12 +277,27 @@ Looks great! Next.
 On the QQ plot, we want to see residuals on the black line, meaning they follow their theoretical normal distribution.  
 ```{r}
 
+crd_resid |>
+  ggplot(aes(sample = .stud_resid))+
+  stat_qq()+
+  stat_qq_line()
+
 ```
 
 It's common for some residuals in the tails being off, especially with low N (N=36). Nothing to worry here.  
 
 
 ```{r}
+
+crd_resid |>
+  ggplot(aes(x = .stud_resid))+
+  geom_density(fill = "purple",
+               alpha = 0.2)+
+  scale_x_continuous(
+    breaks = c(-3,0,3),
+    limits = c(-3,3)
+  )+
+  theme_minimal()
 
 
 ```
@@ -248,7 +312,8 @@ Next.
 - Adding a `geom_hline()` at the thresholds helps to visualize and diagnose.   
 
 ```{r}
-ggplot(crd_resid, aes(x=.fitted, y=.studresid))+
+
+ggplot(crd_resid, aes(x=.fitted, y=.stud_resid))+
   geom_hline(yintercept = 0, color="red")+
   geom_point(shape = 21,
              fill = "purple", 
@@ -259,6 +324,7 @@ ggplot(crd_resid, aes(x=.fitted, y=.studresid))+
   theme_bw()
 
 ```
+
 All residuals are within the [-3, 3] interval, so nothing to worry here.  
 Now that model assumptions have been checked and met, we can proceed to using the model for inference.  
 
@@ -271,22 +337,35 @@ This is specially important IF the data is unbalanced (i.e., missing data), in w
 
 Also, when extracting means from an interaction, there are few different ways of doing it, and which one we do depends on the study objectives. Let's explore them below.
 
+***Model means won't be the same as arithmetic means calculated from group_by() and summarise()***
+
 ```{r interaction means all}
-crd_means_all 
+
+#compare all means across all treatments
+#em stands for expected marginal mean!
+crd_means_all <- emmeans::emmeans(crd_mod,
+                                  ~nrate_kgha:krate_kgha)
 
 crd_means_all
+
 ```
 
 ```{r interaction means n inside k}
-crd_means_nk 
+
+crd_means_nk <- emmeans(crd_mod,
+                        ~nrate_kgha|krate_kgha)
 
 crd_means_nk
+
 ```
 
 ```{r interaction means k inside n}
-crd_means_kn 
+
+crd_means_kn <- emmeans(crd_mod,
+                        ~krate_kgha|nrate_kgha)
 
 crd_means_kn
+
 ```
 
 Notice how the 3 different approaches create structure in the mean extraction, which will carry over to the pwc step.  
@@ -297,27 +376,37 @@ Now that we extracted means, let's perform pairwise comparisons among them.
 First, let's extract means for all 3 types of interaction means extracted above. After that, we'll make a decision on which one to use.
 
 ```{r interaction pwc all}
-crd_cld_all <- 
+
+#cld = compact letter display
+crd_cld_all <- cld(crd_means_all,
+                   reversed = T,
+                   Letters = letters,
+                   adjust = "none")
 
 crd_cld_all
+
 ```
 
 ```{r interaction pwc n inside k}
+
 crd_cld_nk <- cld(crd_means_nk, 
                    reversed=T, 
                    adjust="none",
                Letters=letters)
 
 crd_cld_nk
+
 ```
 
 ```{r interaction pwc k inside n}
+
 crd_cld_kn <- cld(crd_means_kn, 
                    reversed=T, 
                    adjust="none",
                Letters=letters) 
 
 crd_cld_kn
+
 ```
 
 Notice how different types of pwc (which are actually coming from differences in how we extracted the means) are testing different hypothesis.  
@@ -325,9 +414,16 @@ Notice how different types of pwc (which are actually coming from differences in
 I would like to test the hypothesis of everything compared to everything else, which corresponds to our first method using `:`. Let's do that below and some light wrangling.    
 
 ```{r selected pwc}
-crd_cld_selected <- crd_cld_all 
+
+crd_cld_selected <- crd_cld_all|>
+  as.data.frame() |>
+  mutate(
+    letter = trimws(.group),
+    trt_name = paste0(krate_kgha,"+",nrate_kgha)
+  )
 
 crd_cld_selected
+
 ```
 
 ## g) Final plot  
@@ -335,7 +431,14 @@ Let's plot our results, including both **raw data** (for allowing our audience t
 
 ```{r crd final plot}
 
-  # Raw data and boxplots  
+  # Raw data and boxplots
+  ggplot()+
+  geom_boxplot(data = crd_dfw,
+               aes(x = trt_name, y = yield_kgha,
+                   color = trt_name))+
+  geom_label(data = crd_cld_selected,
+             aes(x = trt_name, y = emmean,
+                 label = letter))
 
   # Adding letters
 
