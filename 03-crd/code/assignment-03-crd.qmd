@@ -26,6 +26,16 @@ The different sections representing what we did in class were left in the script
 Here is where we load the packages we will use.  
 Make sure to load each package in the chunk below.  
 ```{r setup}
+#| warning: false
+#| message: false
+
+library(tidyverse)
+library(car) # for Anova function
+library(broom) # for model residuals extraction
+library(emmeans) # for model mean extraction
+library(multcomp) # for pairwise comparison letter display
+library(multcompView)
+library(ggsci)
 
 
 ```
@@ -33,6 +43,7 @@ Make sure to load each package in the chunk below.
 Now, import the data set `wheat_nk_bamyan.csv` in the chunk below.  
 ```{r data import}
 
+crd_df <- read.csv("../data/wheat_nk_bamyan.csv")
 
 ```
 
@@ -44,40 +55,214 @@ For that, a study was conducted using a completely randomized design as the expe
 # b) EDA tables  
 Use this space to conduct exploratory data analysis of the imported data, in the form of tables.  
 
+```{r summary}
+
+summary(crd_df)
+
+```
+
+```{r glimpse}
+
+glimpse(crd_df)
+
+```
+
 
 # c) Wrangling  
-Here, make sure to wrangle your data set with all needed steps. Refer back to class code if you need a refresher on what was needed.  
+Here, make sure to wrangle your data set with all needed steps. Refer back to class code if you need a refresher on what was needed.
+
+```{r}
+
+crd_dfw <- crd_df |>
+  mutate_at(
+    vars(krate_kgha,nrate_kgha,rep), as.factor)|>
+  mutate(
+    trt_name = paste0(krate_kgha,"+",nrate_kgha)
+  )
+
+```
+
 
 
 # d) EDA plots  
 Now, explore the wrangled data using plots.  
-Make sure to explore plots showing the main effects and the interaction.  
+Make sure to explore plots showing the main effects and the interaction.
 
-## Question 1) Below each plot of this section, write a sentence explaining your visual interpretation of the plot.  
+## N effects boxplot
+```{r}
+#| echo: false
+#| fig-width: 7
+#| fig-height: 3
+
+crd_dfw|>
+  ggplot(aes(x = nrate_kgha, y = yield_kgha,
+             color = nrate_kgha))+
+  geom_boxplot()+
+  geom_jitter(alpha = 0.4)+
+  theme(
+    legend.position = "none"
+  )+
+  scale_color_npg()
+
+```
+
+  - This plot indicates that there is a slight response in yield from increasing N fertilizer rate from 0 to 100 kg/ha, but adding 200 kg/ha does not appear to have a strong response in increased yield.
+
+## K effects boxplot
+```{r}
+#| echo: false
+#| #| fig-width: 2
+#| fig-height: 3
+
+ggplot(crd_dfw, aes(x = krate_kgha, 
+                    y = yield_kgha,
+                    color = krate_kgha)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 0.4) +
+  theme(legend.position = "none")+
+  scale_color_npg()
+
+```
+
+  - This plot indicates that there is an initial linear response in yield from increasing K fertilizer rate from 0 to 30 kg/ha, but adding 60 kg/ha has a less pronounced effect.
+
+## N + K effects boxplot
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 3
+
+crd_dfw |>
+  ggplot(aes(x = nrate_kgha, y = yield_kgha,
+             color = nrate_kgha,))+
+  geom_boxplot()+
+  geom_jitter(alpha = 0.4)+
+  facet_grid(~krate_kgha)+
+  theme(legend.position = "none")+
+  scale_color_npg()
+
+crd_dfw |>
+  ggplot(aes(x = krate_kgha, y = yield_kgha,
+             color = nrate_kgha,))+
+  geom_boxplot()+
+  geom_jitter(alpha = 0.4)+
+  facet_grid(~nrate_kgha)+
+  theme(legend.position = "none")+
+  scale_color_npg()
+
+```
+
+  - This plot indicates that there are different yield responses to N application rate depending on the amount of K applied with it - differences in yield responses to N application amount appear to be most pronounced when also applied with 30 kg/ha of K. 
+
+
+## Question 1) Below each plot of this section, write a sentence explaining your visual interpretation of the plot.
+
+
 
 # e) Statistical model  
 In this section, run the appropriate model.  
-Remember to set the contrast type to sum-to-zero (the default in R is set-to-zero, which is not what we want).  
+Remember to set the contrast type to sum-to-zero (the default in R is set-to-zero, which is not what we want).
+```{r}
 
-Also, remember to specify all model terms needed for the treatment design.  
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# attach dataframe to include in model
+attach(crd_dfw)
+
+# Model fitting
+crd_mod <- lm(yield_kgha ~ nrate_kgha*krate_kgha) 
+
+# Summary
+summary(crd_mod)
+
+```
+
+Also, remember to specify all model terms needed for the treatment design.
+   - Model terms needed for this treatment design should include N effect, K effect, and N+K interaction effect. Since we are not using RCBD design, there is no need to include a blocking term.
 
 # f) ANOVA table  
 Use this section to check the ANOVA table, ensuring you use type 3 sum-of-squares.
+```{r}
+
+Anova(crd_mod, type = 3)
+
+```
 
 
-## Question 2) Based on the ANOVA table above, for which effect(s) in the ANOVA should you extract means and perform pair-wise comparisons? Explain why.  
+
+## Question 2) Based on the ANOVA table above, for which effect(s) in the ANOVA should you extract means and perform pair-wise comparisons? Explain why.
+  - Based on the results of the ANOVA table above, the only significant effects were N application rate and K application rate - there was no significant interaction effect between these two factors. For this reason, means and pair-wise comparisons should be done on N and K application rates separately.
 
 
 # g) Linear model assumptions  
-Use this section to first compute your residuals, including studentdized residuals.  
+Use this section to first compute your residuals, including studentdized residuals.
+```{r}
+
+crd_modn <- lm(yield_kgha ~ nrate_kgha)
+
+summary(crd_modn)
+
+Anova(crd_modn)
+
+crd_residn <- broom::augment(crd_modn) |>
+  mutate(
+    .stud_resid = rstudent(crd_modn)
+  )
+
+crd_modk <- lm(yield_kgha ~ krate_kgha)
+
+summary(crd_modk)
+
+Anova(crd_modk)
+
+crd_residk <- broom::augment(crd_modk) |>
+  mutate(
+    .stud_resid = rstudent(crd_modk)
+  )
+
+
+```
 
 ## Question 3) What are the linear model assumptions that we need to check for? Create subsections (using ##) below for each of these assumptions, and write code to produce plots to check for these assumptions. For each assumption, write down your interpretation of the produced plots, and your thoughts if the assumptions hold or not.  
 
 # h) Model means  
-Use this section to extract model means according to your decision of the ANOVA table effects.  
+Use this section to extract model means according to your decision of the ANOVA table effects.
+## Extract model means
+```{r}
+
+crd_meansn <- emmeans::emmeans(crd_modn,
+                                  ~nrate_kgha)
+
+crd_meansk <- emmeans::emmeans(crd_modk,
+                                  ~krate_kgha)
+
+```
 
 # i) Pairwise comparisons  
-Use this section to perform pair-wise comparison of the means extracted above.  
+Use this section to perform pair-wise comparison of the means extracted above.
+```{r}
+
+crd_cldn <- cld(crd_meansn, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters)
+
+crd_cldk <- cld(crd_meansk, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters)
+
+combined_cldk <- crd_cldn |>
+  full_join(crd_cldk) |
+  mutate(
+    element = case_when(
+      element == "nrate_kgha" ~ "nitrogen",
+      element == "krate_kgha" ~ "potassium"
+    ))
+
+
+```
 
 Make sure to reverse the order from high to low, use letters instead of numbers, and no adjustment.  
 
@@ -92,6 +277,91 @@ In class, we did not have time to make it publication-ready (e.g., a plot lookin
 Here, make sure you deliver final plot(s) that is/are publication ready.  
 
 Make sure to provide an interpretation for the plot(s) created, including which treatment levels were significantly higher/lower.
+
+```{r}
+
+crd_cld_selected <- combined_cldk|>
+  as.data.frame() |>
+  mutate(
+    letter = trimws(.group),
+    trt_name = paste0(krate_kgha,"+",nrate_kgha)
+  ) |>
+  pivot_longer(
+    c(1,8),
+    names_to = "element",
+    values_to = "rate_kgha"
+  ) |>
+  mutate(
+    element = case_when(
+      element == "nrate_kgha" ~ "nitrogen",
+      element == "krate_kgha" ~ "potassium"
+    )
+  )|>
+  drop_na()
+
+crd_dfw <- crd_dfw |>
+  pivot_longer(
+    c(3,4),
+    names_to = "element",
+    values_to = "rate_kgha"
+  )|>
+  mutate(
+    element = case_when(
+      element == "nrate_kgha" ~ "nitrogen",
+      element == "krate_kgha" ~ "potassium"
+    )
+  )
+
+  ggplot()+
+  geom_boxplot(data = crd_dfw,
+               aes(x = rate_kgha, y = yield_kgha,
+                   fill = rate_kgha), color = "black",
+               alpha = 0.6, lwd = 0.6)+
+    geom_jitter(data = crd_dfw,
+                aes(x = rate_kgha, y = yield_kgha,
+                    color = rate_kgha), alpha = 0.5,
+                width = 0.2)+
+    geom_label(data = crd_cld_selected,
+             aes(x = rate_kgha, y = emmean,
+                 label = letter,vjust = -0.6), label.size = NA,
+                 alpha = 0)+
+    scale_y_continuous(limits = c(600,7500))+
+    facet_wrap(~element, scales = "free",
+               nrow = 1)+
+    scale_fill_npg()+
+    scale_color_npg()+
+    theme_bw()+
+    theme(
+      legend.position = "top",
+      panel.spacing.x = unit(4, "lines"),
+      panel.background = element_rect(fill = 'lightgrey'),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.y = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.title.x = element_text(
+        size = 16,
+        face = "bold",
+        margin = margin(t = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12))+
+     guides(colour = guide_legend(
+     override.aes = list(size = 1.0),nrow = 1))+
+   ylab("Yield (kg/ha)")+
+   xlab("Application rate (kg/ha)")
+    
+
+```
+
 
 
 # Submitting your work  
