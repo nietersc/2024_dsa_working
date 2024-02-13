@@ -126,8 +126,11 @@ Below we change the default to sum-to-zero ("contr.sum") before fitting the mode
 # Changing to sum-to-zero contrast
 options(contrasts = c("contr.sum", "contr.poly"))
 
-# Model fitting
-rcbd_mod 
+#attach dataset
+attach(rcbd_dfw)
+
+# Model fitting - treating blocks as fixed effects
+rcbd_mod <- lm(yield_kgha ~ rep + nrate_kgha*krate_kgha)
 
 # Summary
 summary(rcbd_mod)
@@ -144,7 +147,9 @@ If data is balanced, type 1 and 3 give same results.
 For sake of peace of mind, it is simpler to just always use type 3.  
 
 ```{r ANOVA}
+
 Anova(rcbd_mod, type=3)
+
 ```
 Notice how rep (i.e., block in this case) has a significant effect.  
 
@@ -159,10 +164,12 @@ Before we do that, let's check our model assumptions. Remember, a model is only 
 First, let's extract our model residuals, and also create studentized residuals.  
 
 ```{r rcbd_resid}
+
 rcbd_resid <- augment(rcbd_mod) %>%
   mutate(.studresid=rstudent(rcbd_mod))
 
 rcbd_resid
+
 ```
 
 Now, let's recap the linear model assumptions:  
@@ -179,6 +186,7 @@ Now, let's recap the linear model assumptions:
 - Adding a `geom_smooth()` helps with that conclusion. We want to see the smooth line and error bands comprising 0 on the y axis.  
 
 ```{r }
+
 ggplot(rcbd_resid, aes(x=.fitted, y=.studresid))+
   geom_hline(yintercept = 0, color="red")+
   geom_point(shape = 21,
@@ -188,6 +196,7 @@ ggplot(rcbd_resid, aes(x=.fitted, y=.studresid))+
   #geom_smooth()+
   geom_hline(yintercept = c(-3,3), color = "red")+
   theme_bw()
+
 ```
 
 Run the plot above with and without `geom_smooth()`.  
@@ -202,6 +211,7 @@ Although it seems like there is some pattern, I wouldn't worry here since the er
 - Adding a `geom_smooth()` helps with that conclusion. We want to see the smooth line and error bands comprising 0 on the y axis.  
 
 ```{r }
+
 ggplot(rcbd_resid, aes(x=.fitted, y=.studresid))+
   geom_hline(yintercept = 0, color="red")+
   geom_point(shape = 21,
@@ -211,6 +221,7 @@ ggplot(rcbd_resid, aes(x=.fitted, y=.studresid))+
   geom_smooth()+
   geom_hline(yintercept = c(-3,3), color = "red")+
   theme_bw()
+
 ```
 Looks great! Next.  
 
@@ -221,6 +232,7 @@ Looks great! Next.
 
 On the QQ plot, we want to see residuals on the black line, meaning they follow their theoretical normal distribution.  
 ```{r}
+
 ggplot(rcbd_resid, aes(sample=.studresid))+
   stat_qq(  shape = 21,
             fill = "purple", 
@@ -231,12 +243,14 @@ ggplot(rcbd_resid, aes(sample=.studresid))+
   labs(x = "Theoretical quantile",
        y = "Sample quantile")+
   theme_bw()
+
 ```
 
 It's common for some residuals in the tails being off, especially with low N (N=36). Nothing to worry here.  
 
 
 ```{r}
+
 ggplot(rcbd_resid, aes(x=.studresid))+
   geom_density(color = "black",
                fill = "purple",
@@ -256,6 +270,7 @@ Next.
 - Adding a `geom_hline()` at the thresholds helps to visualize and diagnose.   
 
 ```{r}
+
 ggplot(rcbd_resid, aes(x=.fitted, y=.studresid))+
   geom_hline(yintercept = 0, color="red")+
   geom_point(shape = 21,
@@ -277,29 +292,42 @@ Remember that it is at this level that we establish the hierarchy of how our pai
 
 Let's extract it by comparing everything to everything else.
 ```{r interaction means all}
-rcbd_means_all 
+
+rcbd_means_all <- emmeans::emmeans(
+  rcbd_mod, ~nrate_kgha:krate_kgha
+)
 
 rcbd_means_all
+
 ```
 
 # i) Pairwise comparisons  
 Now that we extracted means, let's perform pairwise comparisons among them.  
 
 ```{r interaction pwc all}
+
 rcbd_cld_all <- cld(rcbd_means_all, 
-                   reversed=T, 
-                   adjust="none",
-               Letters=letters)
+                   reversed = T, 
+                   adjust = "none", #none = Fishers LSD
+               Letters = letters)
 
 rcbd_cld_all
+
 ```
 
 Let's do some light wrangling here to be able to plot these.  
 
 ```{r selected pwc}
-rcbd_cld_selected <- rcbd_cld_all 
+
+rcbd_cld_selected <- rcbd_cld_all |>
+  as.data.frame() |>
+  mutate(
+    letter = trimws(.group),
+    trtname = paste0(nrate_kgha,"+",krate_kgha)
+  )
 
 rcbd_cld_selected
+
 ```
 
 # g) Final plot  
@@ -307,6 +335,36 @@ Let's plot our results, including both **raw data** (for allowing our audience t
 Let's make this plot publication ready.  
 
 ```{r rcbd final plot}
+#| fig-width: 8
+#| fig-height: 5
+
+library(ggsci)
+
+  ggplot(mapping = aes(fill = trtname))+
+  geom_boxplot(data = rcbd_dfw,
+               aes(x = trtname, y = yield_kgha),
+               alpha = 0.8)+
+  geom_jitter(data = rcbd_dfw,
+              aes(x = trtname, y = yield_kgha),
+              width = 0.2, shape = 21, alpha = 0.4,
+              size = 3) +
+  geom_label(data = rcbd_cld_selected,
+             aes(x = trtname, y = emmean,
+                 label = letter), fill = "white",
+             vjust = -9, label.size = NA, alpha = 0.3)+
+  scale_y_continuous(limits = c(2000,8000))+
+  ylab("Yield (kg/ha)")+
+  xlab("N rate + K rate (kg/ha)")+
+  scale_fill_npg()+
+  theme(
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  )
+  
+ggsave("output/rcbd_means.png",
+       height = 8,
+       width = 10)
 
 ```
 

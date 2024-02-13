@@ -323,7 +323,8 @@ crd_dfw <- crd_dfw |>
                 width = 0.2)+
     geom_label(data = crd_cld_selected,
              aes(x = rate_kgha, y = emmean,
-                 label = letter,vjust = -0.6), label.size = NA,
+                 label = letter,vjust = -0.6),
+             label.size = NA,
                  alpha = 0)+
     scale_y_continuous(limits = c(600,7500))+
     facet_wrap(~element, scales = "free",
