@@ -43,7 +43,7 @@ library(ggsci)
 Now, import the data set `wheat_nk_bamyan.csv` in the chunk below.  
 ```{r data import}
 
-crd_df <- read.csv("../data/wheat_nk_bamyan.csv")
+crd_df <- read.csv("data/wheat_nk_bamyan.csv")
 
 ```
 
@@ -81,7 +81,6 @@ crd_dfw <- crd_df |>
   )
 
 ```
-
 
 
 # d) EDA plots  
@@ -171,7 +170,8 @@ options(contrasts = c("contr.sum", "contr.poly"))
 attach(crd_dfw)
 
 # Model fitting
-crd_mod <- lm(yield_kgha ~ nrate_kgha*krate_kgha) 
+crd_mod <- lm(yield_kgha ~ nrate_kgha*krate_kgha,
+              data = crd_dfw) 
 
 # Summary
 summary(crd_mod)
@@ -179,11 +179,13 @@ summary(crd_mod)
 ```
 
 Also, remember to specify all model terms needed for the treatment design.
+
    - Model terms needed for this treatment design should include N effect, K effect, and N+K interaction effect. Since we are not using RCBD design, there is no need to include a blocking term.
 
 # f) ANOVA table  
 Use this section to check the ANOVA table, ensuring you use type 3 sum-of-squares.
 ```{r}
+#| echo: true
 
 Anova(crd_mod, type = 3)
 
@@ -192,35 +194,37 @@ Anova(crd_mod, type = 3)
 
 
 ## Question 2) Based on the ANOVA table above, for which effect(s) in the ANOVA should you extract means and perform pair-wise comparisons? Explain why.
+
   - Based on the results of the ANOVA table above, the only significant effects were N application rate and K application rate - there was no significant interaction effect between these two factors. For this reason, means and pair-wise comparisons should be done on N and K application rates separately.
 
-
-# g) Linear model assumptions  
-Use this section to first compute your residuals, including studentdized residuals.
+## Models for individual predictors  
 ```{r}
+#| echo: true
 
 crd_modn <- lm(yield_kgha ~ nrate_kgha)
 
-summary(crd_modn)
+crd_modk <- lm(yield_kgha ~ krate_kgha)
 
-Anova(crd_modn)
+Anova(crd_modn, type = 3)
+Anova(crd_modk, type = 3)
+
+
+```
+  
+# g) Linear model assumptions  
+Use this section to first compute your residuals, including studentdized residuals.
+```{r}
+#| echo: true
 
 crd_residn <- broom::augment(crd_modn) |>
   mutate(
     .stud_resid = rstudent(crd_modn)
   )
 
-crd_modk <- lm(yield_kgha ~ krate_kgha)
-
-summary(crd_modk)
-
-Anova(crd_modk)
-
 crd_residk <- broom::augment(crd_modk) |>
   mutate(
     .stud_resid = rstudent(crd_modk)
   )
-
 
 ```
 
@@ -228,8 +232,10 @@ crd_residk <- broom::augment(crd_modk) |>
 
 # h) Model means  
 Use this section to extract model means according to your decision of the ANOVA table effects.
+
 ## Extract model means
 ```{r}
+#| echo: true
 
 crd_meansn <- emmeans::emmeans(crd_modn,
                                   ~nrate_kgha)
@@ -242,6 +248,7 @@ crd_meansk <- emmeans::emmeans(crd_modk,
 # i) Pairwise comparisons  
 Use this section to perform pair-wise comparison of the means extracted above.
 ```{r}
+#| echo: true
 
 crd_cldn <- cld(crd_meansn, 
                    reversed=T, 
@@ -254,13 +261,7 @@ crd_cldk <- cld(crd_meansk,
                Letters=letters)
 
 combined_cldk <- crd_cldn |>
-  full_join(crd_cldk) |
-  mutate(
-    element = case_when(
-      element == "nrate_kgha" ~ "nitrogen",
-      element == "krate_kgha" ~ "potassium"
-    ))
-
+  full_join(crd_cldk)
 
 ```
 
@@ -299,6 +300,7 @@ crd_cld_selected <- combined_cldk|>
   )|>
   drop_na()
 
+
 crd_dfw <- crd_dfw |>
   pivot_longer(
     c(3,4),
@@ -319,46 +321,45 @@ crd_dfw <- crd_dfw |>
                alpha = 0.6, lwd = 0.6)+
     geom_jitter(data = crd_dfw,
                 aes(x = rate_kgha, y = yield_kgha,
-                    color = rate_kgha), alpha = 0.5,
-                width = 0.2)+
+                    fill = rate_kgha), alpha = 0.5,
+                width = 0.4, shape = 21)+
     geom_label(data = crd_cld_selected,
              aes(x = rate_kgha, y = emmean,
-                 label = letter,vjust = -0.6),
-             label.size = NA,
+                 label = letter,vjust = -0.15),
+             label.size = NA, size = 6,
                  alpha = 0)+
     scale_y_continuous(limits = c(600,7500))+
     facet_wrap(~element, scales = "free",
                nrow = 1)+
-    scale_fill_npg()+
-    scale_color_npg()+
     theme_bw()+
     theme(
-      legend.position = "top",
       panel.spacing.x = unit(4, "lines"),
       panel.background = element_rect(fill = 'lightgrey'),
-        strip.background = element_rect(fill = "black"),
+        strip.background = element_rect(fill = "grey27"),
         strip.text = element_text(size = 14,
                                 face = "bold",
                                 color = "white"),
-        axis.title.y = element_text(
+      axis.title.y = element_text(
         size = 16,
         face = "bold",
         margin = margin(r = 25)),
-        axis.title.x = element_text(
+      axis.title.x = element_text(
         size = 16,
         face = "bold",
         margin = margin(t = 25)),
-        axis.text.y = element_text(
+      axis.text.y = element_text(
         margin = margin(t = 5),
         size = 10,
         face = "bold"),
-      legend.title = element_text(size = 14,
-                                  face = "bold"),
-      legend.text = element_text(size = 12))+
-     guides(colour = guide_legend(
-     override.aes = list(size = 1.0),nrow = 1))+
+      axis.text.x = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.position = "none")+
    ylab("Yield (kg/ha)")+
-   xlab("Application rate (kg/ha)")
+   xlab("Application rate (kg/ha)")+
+   scale_fill_npg()+
+   scale_color_npg()
     
 
 ```
