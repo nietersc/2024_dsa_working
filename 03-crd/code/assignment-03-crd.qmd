@@ -43,7 +43,7 @@ library(ggsci)
 Now, import the data set `wheat_nk_bamyan.csv` in the chunk below.  
 ```{r data import}
 
-crd_df <- read.csv("data/wheat_nk_bamyan.csv")
+crd_df <- read.csv("../data/wheat_nk_bamyan.csv")
 
 ```
 
@@ -140,15 +140,6 @@ crd_dfw |>
   theme(legend.position = "none")+
   scale_color_npg()
 
-crd_dfw |>
-  ggplot(aes(x = krate_kgha, y = yield_kgha,
-             color = nrate_kgha,))+
-  geom_boxplot()+
-  geom_jitter(alpha = 0.4)+
-  facet_grid(~nrate_kgha)+
-  theme(legend.position = "none")+
-  scale_color_npg()
-
 ```
 
   - This plot indicates that there are different yield responses to N application rate depending on the amount of K applied with it - differences in yield responses to N application amount appear to be most pronounced when also applied with 30 kg/ha of K. 
@@ -170,8 +161,7 @@ options(contrasts = c("contr.sum", "contr.poly"))
 attach(crd_dfw)
 
 # Model fitting
-crd_mod <- lm(yield_kgha ~ nrate_kgha*krate_kgha,
-              data = crd_dfw) 
+crd_mod <- lm(yield_kgha ~ nrate_kgha*krate_kgha) 
 
 # Summary
 summary(crd_mod)
@@ -187,10 +177,9 @@ Use this section to check the ANOVA table, ensuring you use type 3 sum-of-square
 ```{r}
 #| echo: true
 
-Anova(crd_mod, type = 3)
+car::Anova(crd_mod, type = 3)
 
 ```
-
 
 
 ## Question 2) Based on the ANOVA table above, for which effect(s) in the ANOVA should you extract means and perform pair-wise comparisons? Explain why.
@@ -198,16 +187,24 @@ Anova(crd_mod, type = 3)
   - Based on the results of the ANOVA table above, the only significant effects were N application rate and K application rate - there was no significant interaction effect between these two factors. For this reason, means and pair-wise comparisons should be done on N and K application rates separately.
 
 ## Models for individual predictors  
+
+### N rate model
 ```{r}
 #| echo: true
 
+#model for N rate
 crd_modn <- lm(yield_kgha ~ nrate_kgha)
-
-crd_modk <- lm(yield_kgha ~ krate_kgha)
-
+#ANOVA for N rate
 Anova(crd_modn, type = 3)
-Anova(crd_modk, type = 3)
 
+```
+
+### K rate model
+```{r}
+#model for K rate
+crd_modk <- lm(yield_kgha ~ krate_kgha)
+#ANOVA for K rate
+Anova(crd_modk, type = 3)
 
 ```
   
@@ -215,20 +212,125 @@ Anova(crd_modk, type = 3)
 Use this section to first compute your residuals, including studentdized residuals.
 ```{r}
 #| echo: true
+#| warning: false
+#| message: false
 
+
+#calc studentized residuals N
 crd_residn <- broom::augment(crd_modn) |>
   mutate(
     .stud_resid = rstudent(crd_modn)
   )
 
+#calc studentized residuals K
 crd_residk <- broom::augment(crd_modk) |>
   mutate(
     .stud_resid = rstudent(crd_modk)
   )
 
+#combine residual tables
+combined_resid <- crd_residn |>
+  full_join(crd_residk)|>
+  pivot_longer(
+    c(2,10),
+    names_to = "element",
+    values_to = "rate_kgha"
+  ) |>
+  drop_na()
+  
+
 ```
 
-## Question 3) What are the linear model assumptions that we need to check for? Create subsections (using ##) below for each of these assumptions, and write code to produce plots to check for these assumptions. For each assumption, write down your interpretation of the produced plots, and your thoughts if the assumptions hold or not.  
+## Question 3) What are the linear model assumptions that we need to check for? Create subsections (using ##) below for each of these assumptions, and write code to produce plots to check for these assumptions. For each assumption, write down your interpretation of the produced plots, and your thoughts if the assumptions hold or not.
+
+### Assumption 1: Residual independence  
+```{r }
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 8
+#| fig-height: 3
+
+combined_resid |>
+  ggplot(aes(x = .fitted, y = .stud_resid))+
+  geom_smooth()+
+  geom_point(shape = 21,
+             fill = "purple",
+             size = 3,
+             alpha = 0.7)+
+  facet_wrap(~element, scales = "free")
+
+```
+
+### Assumption 2: Residual homoscedasticity
+```{r }
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 8
+#| fig-height: 3
+
+ggplot(combined_resid, aes(x=.fitted, y=.stud_resid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()+
+  facet_wrap(~element, scales = "free")
+
+```
+
+### Assumption 3: Residual normality  
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 8
+#| fig-height: 3
+
+combined_resid |>
+  ggplot(aes(sample = .stud_resid))+
+  stat_qq()+
+  stat_qq_line()+
+  facet_wrap(~element, scales = "free")
+
+
+combined_resid |>
+  ggplot(aes(x = .stud_resid))+
+  geom_density(fill = "purple",
+               alpha = 0.2)+
+  scale_x_continuous(
+    breaks = c(-3,0,3),
+    limits = c(-3,3)
+  )+
+  theme_minimal()+
+  facet_wrap(~element, scales = "free")
+
+```
+
+### Assumption 4: Residual outliers  
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 8
+#| fig-height: 3
+
+ggplot(combined_resid, aes(x=.fitted, y=.stud_resid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()+
+  facet_wrap(~element, scales = "free")
+
+```
 
 # h) Model means  
 Use this section to extract model means according to your decision of the ANOVA table effects.
@@ -237,29 +339,35 @@ Use this section to extract model means according to your decision of the ANOVA 
 ```{r}
 #| echo: true
 
+#extract estimated marginal means N
 crd_meansn <- emmeans::emmeans(crd_modn,
                                   ~nrate_kgha)
 
+#extract estimated marginal means K
 crd_meansk <- emmeans::emmeans(crd_modk,
                                   ~krate_kgha)
-
 ```
 
 # i) Pairwise comparisons  
 Use this section to perform pair-wise comparison of the means extracted above.
 ```{r}
 #| echo: true
+#| warning: false
+#| message: false
 
+#compact letter display N
 crd_cldn <- cld(crd_meansn, 
                    reversed=T, 
                    adjust="none",
                Letters=letters)
 
+#compact letter display K
 crd_cldk <- cld(crd_meansk, 
                    reversed=T, 
                    adjust="none",
                Letters=letters)
 
+#combine objects for wrangling and plotting next
 combined_cldk <- crd_cldn |>
   full_join(crd_cldk)
 
@@ -280,7 +388,11 @@ Here, make sure you deliver final plot(s) that is/are publication ready.
 Make sure to provide an interpretation for the plot(s) created, including which treatment levels were significantly higher/lower.
 
 ```{r}
+#| warning: false
+#| message: false
+#| echo: false
 
+#Create dataframe from cld and wrangle for plotting
 crd_cld_selected <- combined_cldk|>
   as.data.frame() |>
   mutate(
@@ -301,6 +413,7 @@ crd_cld_selected <- combined_cldk|>
   drop_na()
 
 
+#wrangle raw data for easier plotting and compatibility
 crd_dfw <- crd_dfw |>
   pivot_longer(
     c(3,4),
@@ -314,6 +427,7 @@ crd_dfw <- crd_dfw |>
     )
   )
 
+#Final plot
   ggplot()+
   geom_boxplot(data = crd_dfw,
                aes(x = rate_kgha, y = yield_kgha,
@@ -329,16 +443,17 @@ crd_dfw <- crd_dfw |>
              label.size = NA, size = 6,
                  alpha = 0)+
     scale_y_continuous(limits = c(600,7500))+
-    facet_wrap(~element, scales = "free",
-               nrow = 1)+
     theme_bw()+
     theme(
       panel.spacing.x = unit(4, "lines"),
-      panel.background = element_rect(fill = 'lightgrey'),
-        strip.background = element_rect(fill = "grey27"),
-        strip.text = element_text(size = 14,
-                                face = "bold",
-                                color = "white"),
+      panel.background = element_rect(
+        fill = 'lightgrey'),
+      strip.background = element_rect(
+        fill = "grey27"),
+      strip.text = element_text(
+        size = 14,
+        face = "bold",
+        color = "white"),
       axis.title.y = element_text(
         size = 16,
         face = "bold",
@@ -359,7 +474,9 @@ crd_dfw <- crd_dfw |>
    ylab("Yield (kg/ha)")+
    xlab("Application rate (kg/ha)")+
    scale_fill_npg()+
-   scale_color_npg()
+   scale_color_npg()+
+   facet_wrap(~element, scales = "free",
+               nrow = 2)
     
 
 ```
