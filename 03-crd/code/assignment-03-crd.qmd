@@ -34,16 +34,14 @@ library(car) # for Anova function
 library(broom) # for model residuals extraction
 library(emmeans) # for model mean extraction
 library(multcomp) # for pairwise comparison letter display
-library(multcompView)
 library(ggsci)
-
 
 ```
 
 Now, import the data set `wheat_nk_bamyan.csv` in the chunk below.  
 ```{r data import}
 
-crd_df <- read.csv("../data/wheat_nk_bamyan.csv")
+crd_df <- read.csv("data/wheat_nk_bamyan.csv")
 
 ```
 
