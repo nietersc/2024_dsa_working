@@ -71,11 +71,20 @@ Here, make sure to wrangle your data set with all needed steps. Refer back to cl
 
 ```{r}
 
+# crd_dfw <- crd_df |>
+#   mutate_at(
+#     vars(krate_kgha,nrate_kgha,rep), as.factor)|>
+#   mutate(
+#     trt_name = paste0(krate_kgha,"+",nrate_kgha)
+#   )
+
 crd_dfw <- crd_df |>
-  mutate_at(
-    vars(krate_kgha,nrate_kgha,rep), as.factor)|>
   mutate(
-    trt_name = paste0(krate_kgha,"+",nrate_kgha)
+    krate_kgha = factor(krate_kgha),
+    nrate_kgha = factor(nrate_kgha),
+    rep = factor(rep))|>
+  mutate(
+    trt_name = paste0(nrate_kgha,"+",krate_kgha)
   )
 
 ```
@@ -153,7 +162,7 @@ Remember to set the contrast type to sum-to-zero (the default in R is set-to-zer
 ```{r}
 
 # Changing to sum-to-zero contrast
-options(contrasts = c("contr.sum", "contr.poly"))
+options(contrast = c("contr.sum", "contr.poly"))
 
 
 # Model fitting
