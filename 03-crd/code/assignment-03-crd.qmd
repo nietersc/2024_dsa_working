@@ -155,11 +155,10 @@ Remember to set the contrast type to sum-to-zero (the default in R is set-to-zer
 # Changing to sum-to-zero contrast
 options(contrasts = c("contr.sum", "contr.poly"))
 
-# attach dataframe to include in model
-attach(crd_dfw)
 
 # Model fitting
-crd_mod <- lm(yield_kgha ~ nrate_kgha*krate_kgha) 
+crd_mod <- lm(yield_kgha ~ nrate_kgha*krate_kgha,
+              data = crd_dfw) 
 
 # Summary
 summary(crd_mod)
