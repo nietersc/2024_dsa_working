@@ -41,7 +41,7 @@ library(ggsci)
 Now, import the data set `wheat_nk_bamyan.csv` in the chunk below.  
 ```{r data import}
 
-crd_df <- read.csv("data/wheat_nk_bamyan.csv")
+crd_df <- read.csv("../data/wheat_nk_bamyan.csv")
 
 ```
 
@@ -71,18 +71,9 @@ Here, make sure to wrangle your data set with all needed steps. Refer back to cl
 
 ```{r}
 
-# crd_dfw <- crd_df |>
-#   mutate_at(
-#     vars(krate_kgha,nrate_kgha,rep), as.factor)|>
-#   mutate(
-#     trt_name = paste0(krate_kgha,"+",nrate_kgha)
-#   )
-
 crd_dfw <- crd_df |>
-  mutate(
-    krate_kgha = factor(krate_kgha),
-    nrate_kgha = factor(nrate_kgha),
-    rep = factor(rep))|>
+  mutate_at(
+    vars(krate_kgha,nrate_kgha,rep), as.factor)|>
   mutate(
     trt_name = paste0(nrate_kgha,"+",krate_kgha)
   )
@@ -149,7 +140,7 @@ crd_dfw |>
 
 ```
 
-  - This plot indicates that there are different yield responses to N application rate depending on the amount of K applied with it - differences in yield responses to N application amount appear to be most pronounced when also applied with 30 kg/ha of K. 
+  - This plot indicates that there are not different yield responses to N application rate depending on the amount of K applied with it - but differences in yield responses to N application amount appear to be most pronounced when also applied with 30 kg/ha of K. 
 
 
 ## Question 1) Below each plot of this section, write a sentence explaining your visual interpretation of the plot.
@@ -190,25 +181,15 @@ car::Anova(crd_mod, type = 3)
 
 ## Question 2) Based on the ANOVA table above, for which effect(s) in the ANOVA should you extract means and perform pair-wise comparisons? Explain why.
 
-  - Based on the results of the ANOVA table above, the only significant effects were N application rate and K application rate - there was no significant interaction effect between these two factors. For this reason, means and pair-wise comparisons should be done on N and K application rates separately.
+  - Based on the results of the ANOVA table above, the only significant effects were K application rate. There was no significant difference found based on N application rate and no interaction effect between N and K application rate. For this reason, means and pair-wise comparisons should be done on K application rate alone.
 
 ## Models for individual predictors  
-
-### N rate model
-```{r}
-#| echo: true
-
-#model for N rate
-crd_modn <- lm(yield_kgha ~ nrate_kgha)
-#ANOVA for N rate
-Anova(crd_modn, type = 3)
-
-```
 
 ### K rate model
 ```{r}
 #model for K rate
-crd_modk <- lm(yield_kgha ~ krate_kgha)
+crd_modk <- lm(yield_kgha ~ krate_kgha,
+               data = crd_dfw)
 #ANOVA for K rate
 Anova(crd_modk, type = 3)
 
@@ -221,29 +202,11 @@ Use this section to first compute your residuals, including studentdized residua
 #| warning: false
 #| message: false
 
-
-#calc studentized residuals N
-crd_residn <- broom::augment(crd_modn) |>
-  mutate(
-    .stud_resid = rstudent(crd_modn)
-  )
-
 #calc studentized residuals K
 crd_residk <- broom::augment(crd_modk) |>
   mutate(
     .stud_resid = rstudent(crd_modk)
   )
-
-#combine residual tables
-combined_resid <- crd_residn |>
-  full_join(crd_residk)|>
-  pivot_longer(
-    c(2,10),
-    names_to = "element",
-    values_to = "rate_kgha"
-  ) |>
-  drop_na()
-  
 
 ```
 
@@ -257,16 +220,17 @@ combined_resid <- crd_residn |>
 #| fig-width: 8
 #| fig-height: 3
 
-combined_resid |>
+crd_residk |>
   ggplot(aes(x = .fitted, y = .stud_resid))+
   geom_smooth()+
   geom_point(shape = 21,
              fill = "purple",
              size = 3,
-             alpha = 0.7)+
-  facet_wrap(~element, scales = "free")
+             alpha = 0.7)
 
 ```
+  - There appears to be no patterns visible and all residuals appear as a random cloud of data, so I would say this assumption is fulfilled.
+
 
 ### Assumption 2: Residual homoscedasticity
 ```{r }
@@ -276,7 +240,7 @@ combined_resid |>
 #| fig-width: 8
 #| fig-height: 3
 
-ggplot(combined_resid, aes(x=.fitted, y=.stud_resid))+
+ggplot(crd_residk, aes(x=.fitted, y=.stud_resid))+
   geom_hline(yintercept = 0, color="red")+
   geom_point(shape = 21,
              fill = "purple", 
@@ -284,10 +248,11 @@ ggplot(combined_resid, aes(x=.fitted, y=.stud_resid))+
              alpha = .7)+
   geom_smooth()+
   geom_hline(yintercept = c(-3,3), color = "red")+
-  theme_bw()+
-  facet_wrap(~element, scales = "free")
+  theme_bw()
 
 ```
+  - The distribution of the studentized residuals appears to be homoscedastic - the geom_smooth appears to have equal distance across all residuals so this assumption is also valid.
+
 
 ### Assumption 3: Residual normality  
 ```{r}
@@ -297,14 +262,15 @@ ggplot(combined_resid, aes(x=.fitted, y=.stud_resid))+
 #| fig-width: 8
 #| fig-height: 3
 
-combined_resid |>
+crd_residk |>
   ggplot(aes(sample = .stud_resid))+
   stat_qq()+
   stat_qq_line()+
-  facet_wrap(~element, scales = "free")
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")
 
 
-combined_resid |>
+crd_residk |>
   ggplot(aes(x = .stud_resid))+
   geom_density(fill = "purple",
                alpha = 0.2)+
@@ -312,10 +278,11 @@ combined_resid |>
     breaks = c(-3,0,3),
     limits = c(-3,3)
   )+
-  theme_minimal()+
-  facet_wrap(~element, scales = "free")
+  theme_minimal()
 
 ```
+  - The QQ plot shows residuals tracking closely with the theoretical distribution line of residuals and the density plot also shows a normal distribution of the residuals so this assumption is also being met. 
+
 
 ### Assumption 4: Residual outliers  
 ```{r}
@@ -325,7 +292,7 @@ combined_resid |>
 #| fig-width: 8
 #| fig-height: 3
 
-ggplot(combined_resid, aes(x=.fitted, y=.stud_resid))+
+ggplot(crd_residk, aes(x=.fitted, y=.stud_resid))+
   geom_hline(yintercept = 0, color="red")+
   geom_point(shape = 21,
              fill = "purple", 
@@ -333,10 +300,11 @@ ggplot(combined_resid, aes(x=.fitted, y=.stud_resid))+
              alpha = .7)+
   geom_smooth()+
   geom_hline(yintercept = c(-3,3), color = "red")+
-  theme_bw()+
-  facet_wrap(~element, scales = "free")
+  theme_bw()
 
 ```
+  - All residuals are within +/- 3 of zero which should contain 99% of all data points so this assumption is also fulfilled.
+
 
 # h) Model means  
 Use this section to extract model means according to your decision of the ANOVA table effects.
@@ -344,10 +312,6 @@ Use this section to extract model means according to your decision of the ANOVA 
 ## Extract model means
 ```{r}
 #| echo: true
-
-#extract estimated marginal means N
-crd_meansn <- emmeans::emmeans(crd_modn,
-                                  ~nrate_kgha)
 
 #extract estimated marginal means K
 crd_meansk <- emmeans::emmeans(crd_modk,
@@ -361,21 +325,11 @@ Use this section to perform pair-wise comparison of the means extracted above.
 #| warning: false
 #| message: false
 
-#compact letter display N
-crd_cldn <- cld(crd_meansn, 
-                   reversed=T, 
-                   adjust="none",
-               Letters=letters)
-
 #compact letter display K
 crd_cldk <- cld(crd_meansk, 
                    reversed=T, 
                    adjust="none",
                Letters=letters)
-
-#combine objects for wrangling and plotting next
-combined_cldk <- crd_cldn |>
-  full_join(crd_cldk)
 
 ```
 
@@ -399,52 +353,24 @@ Make sure to provide an interpretation for the plot(s) created, including which 
 #| echo: false
 
 #Create dataframe from cld and wrangle for plotting
-crd_cld_selected <- combined_cldk|>
+crd_cld_selected <- crd_cldk|>
   as.data.frame() |>
   mutate(
-    letter = trimws(.group),
-    trt_name = paste0(krate_kgha,"+",nrate_kgha)
-  ) |>
-  pivot_longer(
-    c(1,8),
-    names_to = "element",
-    values_to = "rate_kgha"
-  ) |>
-  mutate(
-    element = case_when(
-      element == "nrate_kgha" ~ "nitrogen",
-      element == "krate_kgha" ~ "potassium"
-    )
-  )|>
-  drop_na()
-
-
-#wrangle raw data for easier plotting and compatibility
-crd_dfw <- crd_dfw |>
-  pivot_longer(
-    c(3,4),
-    names_to = "element",
-    values_to = "rate_kgha"
-  )|>
-  mutate(
-    element = case_when(
-      element == "nrate_kgha" ~ "nitrogen",
-      element == "krate_kgha" ~ "potassium"
-    )
+    letter = trimws(.group)
   )
 
 #Final plot
   ggplot()+
   geom_boxplot(data = crd_dfw,
-               aes(x = rate_kgha, y = yield_kgha,
-                   fill = rate_kgha), color = "black",
+               aes(x = krate_kgha, y = yield_kgha,
+                   fill = krate_kgha), color = "black",
                alpha = 0.6, lwd = 0.6)+
     geom_jitter(data = crd_dfw,
-                aes(x = rate_kgha, y = yield_kgha,
-                    fill = rate_kgha), alpha = 0.5,
-                width = 0.4, shape = 21)+
+                aes(x = krate_kgha, y = yield_kgha,
+                    fill = krate_kgha), alpha = 0.5,
+                width = 0.3, shape = 21, size = 2)+
     geom_label(data = crd_cld_selected,
-             aes(x = rate_kgha, y = emmean,
+             aes(x = krate_kgha, y = emmean,
                  label = letter,vjust = -0.15),
              label.size = NA, size = 6,
                  alpha = 0)+
@@ -478,15 +404,12 @@ crd_dfw <- crd_dfw |>
         face = "bold"),
       legend.position = "none")+
    ylab("Yield (kg/ha)")+
-   xlab("Application rate (kg/ha)")+
+   xlab("K application rate (kg/ha)")+
    scale_fill_npg()+
-   scale_color_npg()+
-   facet_wrap(~element, scales = "free",
-               nrow = 2)
-    
+   scale_color_npg()
 
 ```
-
+  - The final plot shows us that there is a significant difference in yield between 0 and 30 kg/ha of K as well as between 0 and 60 kg/ha of K. There is no significant difference in yield between K applications of 30 and 60 kg/ha. Since there is no effect on yield from N application nor any interaction effects when applying K and N,  I would recommend that the grower should focus only on K application and apply at a rate of 30 kg/ha.
 
 
 # Submitting your work  
