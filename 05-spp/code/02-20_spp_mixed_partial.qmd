@@ -15,6 +15,7 @@ The goals of this exercise are to:
 # a) Setup  
 Here is where we load the packages we will use.  
 ```{r setup}
+
 # Loading packages
 library(tidyverse) # for data wrangling and plotting
 library(car) # for Anova function
@@ -22,6 +23,7 @@ library(lme4)
 library(broom) # for model residuals extraction
 library(emmeans) # for model mean extraction
 library(multcomp) # for pairwise comparison letter display
+
 ```
 
 **IMPORTANT NOTE**:  
@@ -33,34 +35,43 @@ You should NOT analyze a given designed study with a different design than what 
 This is not an option!  
 
 ```{r data import}
-spp_rcbd_df <- read_csv("../data/wheat_nk_balkh.csv")
 
-spp_rcbd_df
+spp_rcbd_df <- read_csv("data/wheat_nk_balkh.csv",
+                        show_col_types = F)
+
 ```
 
 # b) EDA tables  
 ```{r summary}
+
 summary(spp_rcbd_df)
+
 ```
 
 ```{r glimpse}
+
 glimpse(spp_rcbd_df)
+
 ```
+
 # c) Wrangling
 ```{r rcbd_dfw}
+
 spp_rcbd_dfw <- spp_rcbd_df %>%
-  mutate(block = factor(block),
+  mutate(block = factor(rep),
          nrate_kgha = factor(nrate_kgha),
          krate_kgha = factor(krate_kgha) 
          ) %>%
-  mutate(trtname = paste0(nrate_kgha,"+",krate_kgha))
+  mutate(trtname = paste0(nrate_kgha,"+",krate_kgha)) |>
+  dplyr::select(-rep)
 
-spp_rcbd_dfw
 ```
 
 
 ```{r rcbd_dfw}
+
 summary(spp_rcbd_dfw)
+
 ```
 Number of blocks: 4  
 Number o treatments: 3 N rates x 3 K rates = 9  
@@ -69,24 +80,29 @@ Yield: from 2795 to 7445 kg/ha
 
 # d) EDA plots  
 ```{r n boxplot}
+
 ggplot(spp_rcbd_dfw, aes(x = nrate_kgha, 
                     y = yield_kgha,
                     color = nrate_kgha)) +
   geom_boxplot() +
   geom_jitter() +
   theme(legend.position = "none")
+
 ```
 
 ```{r k boxplot}
+
 ggplot(spp_rcbd_dfw, aes(x = krate_kgha, 
                     y = yield_kgha,
                     color = krate_kgha)) +
   geom_boxplot() +
   geom_jitter() +
   theme(legend.position = "none")
+
 ```
 
 ```{r nk boxplot}
+
 ggplot(spp_rcbd_dfw, aes(x = nrate_kgha, 
                     y = yield_kgha,
                     color = nrate_kgha)) +
@@ -94,6 +110,7 @@ ggplot(spp_rcbd_dfw, aes(x = nrate_kgha,
   geom_jitter() +
   facet_grid(.~krate_kgha) +
   theme(legend.position = "none")
+
 ```
 
 # e) Statistical model  
@@ -109,14 +126,19 @@ We have 2 random variance component from the split-plot because we have 2 differ
 
 
 ```{r model}
+
 # Changing to sum-to-zero contrast
 options(contrasts = c("contr.sum", "contr.poly"))
 
 # Model fitting
-spp_rcbd_mix_mod 
+spp_rcbd_mix_mod <- lme4::lmer(data = spp_rcbd_dfw,
+                               formula = yield_kgha ~
+                                 (1|block/krate_kgha) + krate_kgha*nrate_kgha
+                               )
 
 # Summary
 summary(spp_rcbd_mix_mod)
+
 ```
 
 Notice now how the `summary()` above has a new section for **random effects**, with 3 rows:  
@@ -126,8 +148,11 @@ Notice now how the `summary()` above has a new section for **random effects**, w
 
 # f) ANOVA table  
 ```{r ANOVA}
+
 Anova(spp_rcbd_mix_mod, type=3)
+
 ```
+
 Notice how this table is now titled "Analysis of Deviance Table". That's because we are using REML instead of mean squares.  
 
 Also notice how block (i.e., block in this case) does not appear in the ANOVA table above. That's because it only displays **fixed effects**.
@@ -141,11 +166,12 @@ Before we do that, let's check our model assumptions. Remember, a model is only 
 First, let's extract our model residuals, and also create studentized residuals.  
 
 ```{r rcbd_mix_resid}
+
 library(broom.mixed)
+
 spp_rcbd_mix_resid <- augment(spp_rcbd_mix_mod) %>%
   mutate(.studresid=rstudent(spp_rcbd_mix_mod))
 
-spp_rcbd_mix_resid
 ```
 
 Now, let's recap the linear model assumptions:  
@@ -157,16 +183,19 @@ Now, let's recap the linear model assumptions:
 
 One difference in mixed models is that the 3 first assumptions are also applied to the **random effects**, so we need to check it for them as well.  
 
-### Block random effects are iid ~ N(0,var_a)  
+### Block random effects are iid ~ N(0,var_a)
 ```{r randeff_block}
-randeff_block
+
+randeff_block <- ranef(spp_rcbd_mix_mod)$block
 
 randeff_block
+
 ```
 
 For random effects with so few levels (i.e., 4 since that's the number of blocks), the QQ plot is one of the only ways to check for assumptions on random effects.  
 
 ```{r QQ plot for random effects}
+
 ggplot(randeff_block, aes(sample=`(Intercept)`))+
   stat_qq(  shape = 21,
             fill = "purple", 
@@ -177,18 +206,21 @@ ggplot(randeff_block, aes(sample=`(Intercept)`))+
   labs(x = "Theoretical quantile",
        y = "Sample quantile")+
   theme_bw()
+
 ```
+
 Nothing to worry here, especially since we only have 4 points.  
 
 ### Block:krate random effects are iid ~ N(0,var_b)  
 ```{r randeff_block}
-randeff_blockkrate 
 
-randeff_blockkrate
+randeff_blockkrate <- ranef(spp_rcbd_mix_mod)$`krate_kgha:block`
+
 ```
 
 
 ```{r QQ plot for random effects}
+
 ggplot(randeff_blockkrate, aes(sample=`(Intercept)`))+
   stat_qq(  shape = 21,
             fill = "purple", 
@@ -199,11 +231,14 @@ ggplot(randeff_blockkrate, aes(sample=`(Intercept)`))+
   labs(x = "Theoretical quantile",
        y = "Sample quantile")+
   theme_bw()
+
 ```
+
 Nothing to worry here either, let's check residual assumptions.   
 
 ### Within-group errors are iid ~ N(0, var_e)  
 ```{r }
+
 ggplot(spp_rcbd_mix_resid, aes(x=.fitted, y=.studresid))+
   geom_hline(yintercept = 0, color="red")+
   geom_point(shape = 21,
@@ -213,9 +248,10 @@ ggplot(spp_rcbd_mix_resid, aes(x=.fitted, y=.studresid))+
   geom_smooth()+
   geom_hline(yintercept = c(-3,3), color = "red")+
   theme_bw()
+
 ```
 
-- **Independence**: seems liker there is a potential pattern, but since error bands comprise 0 on the y-axis, I'm not worried.  
+- **Independence**: seems like there is a potential pattern, but since error bands comprise 0 on the y-axis, I'm not worried.  
 
 - **Variance homoscedastic**: seems constant across the x-axis.   
 
@@ -223,6 +259,7 @@ ggplot(spp_rcbd_mix_resid, aes(x=.fitted, y=.studresid))+
 
 
 ```{r}
+
 ggplot(spp_rcbd_mix_resid, aes(sample=.studresid))+
   stat_qq(  shape = 21,
             fill = "purple", 
@@ -233,9 +270,11 @@ ggplot(spp_rcbd_mix_resid, aes(sample=.studresid))+
   labs(x = "Theoretical quantile",
        y = "Sample quantile")+
   theme_bw()
+
 ```
 
 ```{r}
+
 ggplot(spp_rcbd_mix_resid, aes(x=.studresid))+
   geom_density(color = "black",
                fill = "purple",
@@ -254,10 +293,10 @@ Remember that it is at this level that we establish the hierarchy of how our pai
 
 Let's extract it by comparing everything to everything else.
 ```{r interaction means all}
+
 spp_rcbd_mix_means_all <- emmeans(spp_rcbd_mix_mod, 
                                   ~nrate_kgha:krate_kgha)
 
-spp_rcbd_mix_means_all
 ```
 
 In a split-plot, we have 2 sources of error because we have 2 different sizes of EU that were randomized separately.  
@@ -268,12 +307,21 @@ What happens with the emmean error if we ask for the emmean of the main effects 
 
 ```{r k rate means}
 
+emmeans(spp_rcbd_mix_mod,
+        ~krate_kgha)
+
 ```
 The SE of the whole-plot treatment factor (k rate) is **232**.
 
 What about for the split-plot treatment factor (n rate)?  
 
 ```{r n rate means }
+
+emmeans(spp_rcbd_mix_mod,
+        ~nrate_kgha)
+
+#SE is lower because this factor is only at the split plot level
+#Have less power at the full plot level (K) because of less replication
 
 ```
 It is 209.  
@@ -289,23 +337,23 @@ Points to notice:
 Now that we extracted means, let's perform pairwise comparisons among them.  
 
 ```{r interaction pwc all}
+
 spp_rcbd_mix_cld_all <- cld(spp_rcbd_mix_means_all, 
                    reversed=T, 
                    adjust="none",
                Letters=letters)
 
-spp_rcbd_mix_cld_all
 ```
 
 Let's do some light wrangling here to be able to plot these.  
 
 ```{r selected pwc}
+
 spp_rcbd_mix_cld_selected <- spp_rcbd_mix_cld_all %>%
   as.data.frame() %>%
   mutate(letter=trimws(.group)) %>%
   mutate(trtname = paste0(nrate_kgha,"+",krate_kgha))
 
-spp_rcbd_mix_cld_selected
 ```
 
 # g) Final plot  
@@ -313,6 +361,7 @@ Let's plot our results, including both **raw data** (for allowing our audience t
 Let's make this plot publication ready.  
 
 ```{r rcbd final plot}
+
 ggplot(mapping = aes(fill = trtname))+
   # Raw data and boxplots  
   geom_boxplot(data = spp_rcbd_dfw,
@@ -337,6 +386,7 @@ ggplot(mapping = aes(fill = trtname))+
 ggsave("../output/spp_rcbd_mix_means.png",
        width = 8,
        height = 5)
+
 ```
 
 What happened the letter separation compared to the RCBD mixed with blocks random?  
