@@ -1,5 +1,5 @@
 ---
-title: "Repeated measure"
+title: "Repeated Measures"
 format: html
 author: "Chris Nieters"
 date: Sys.Date()
@@ -62,19 +62,31 @@ library(nlme) # for repeated measure correlation structures
 Reading data and doing some light wrangling.  
 ```{r}
 #| message: false
-rm_rcbd_df 
+ 
+rm_rcbd_df <- read_csv("data/wheat_nk_balkh_rm.csv",
+                       show_col_types = FALSE) |>
+  mutate_at(vars(c(1:7)), as.factor) |>
+  mutate(fdap = factor(dap))
 
-rm_rcbd_df
+
 ```
 
 # EDA  
 ```{r}
+
 summary(rm_rcbd_df)
+
 ```
 
 ```{r}
+
 ggplot(rm_rcbd_df, aes(x = fdap, 
-                       y = yield_kgha)) 
+                       y = yield_kgha)) +
+  geom_boxplot()+
+  facet_wrap(~trtname)+
+  geom_hline(yintercept = 5000, color = "green",
+             alpha = 0.5)
+
 ```
 
 Yield was measured at 4 time points, in days after planting (dap):  
@@ -114,11 +126,16 @@ We also want to have `fdap` into the fixed effects so we can estimate their mean
 
 
 ```{r} 
+
 options(contrasts = c("contr.sum", "contr.poly"))
 
-mod1_default_lmer 
+mod1_default_lmer <- lme4::lmer(data = rm_rcbd_df,
+                                yield_kgha ~ 
+                                  krate_kgha*nrate_kgha*fdap +
+                                  (1|block/krate_kgha/nrate_kgha))
 
-mod1_default_lmer
+summary(mod1_default_lmer)
+
 
 ```
 
@@ -130,9 +147,15 @@ Let's refit our default model but now with `lme()`.
 The syntax is a bit different where now random effects are specified in their own argument instead of in the formula argument along with the fixed effects. 
 
 ```{r}
-mod1_default 
 
-mod1_default
+mod1_default <- nlme::lme(data = rm_rcbd_df,
+                          yield_kgha ~ krate_kgha*nrate_kgha*fdap,
+                          random = ~ 1 | block/krate_kgha/nrate_kgha)
+
+summary(mod1_default)
+
+#This model is currently exactly the same as the mod1_default model fit above
+
 ```
 
 Both of these models are equivalent.
@@ -140,7 +163,9 @@ Both of these models are equivalent.
 Let's check the ANOVA table for the `lme()` fitted model.  
 
 ```{r}
-Anova(mod1_default, type = 3)
+
+car::Anova(mod1_default, type = 3)
+
 ```
 
 > What is significant here at alpha = 0.05?  
@@ -159,8 +184,13 @@ The autocorrelation values are calculated using pairs of residuals within the in
 The autocorrelation function is useful for investigating serial correlation models for equally spaced data.
 ```{r}
 
+nlme::ACF(mod1_default, resType = "n") |>
+  plot(alpha = 0.01) #add 1% significance band to plot
+
+#if autocorrelation crosses the band, meaning lag 1 and 2 show autocorrelation
+
 ```
-Notice we have 4 lags: 0, 1, 2, and 3. These are corresponding to each of the harvest times.  
+**Notice we have 4 lags: 0, 1, 2, and 3. These are corresponding to each of the harvest times.**  
 
 The dashed lines on this plot are testing the hypothesis of autocorrelation being significantly different than 0. 
 
@@ -171,16 +201,25 @@ We see here that **autocorrelation at lags 1 and 2 go beyond the dashed line**, 
 
 # Model 2 - Compound Symmetry  
 ```{r}
-mod2_cs 
 
-mod2_cs
+mod2_cs <- nlme::lme(data = rm_rcbd_df,
+                          yield_kgha ~ krate_kgha*nrate_kgha*fdap,
+                          random = ~ 1 | block/krate_kgha/nrate_kgha,
+                     correlation = corCompSymm(form = ~ dap))
+#use numerical form in this case, interval distance must be considered as a numerical value
+
+mod2_cs # Rho = 0.115
+
 ```
 Notice how we have a **rho** estimate above, which is the estimated correlation parameter.  
 
 ## empirical autocorrelation function  
 ```{r}
-ACF(mod2_cs, resType = "n") %>%
+
+ACF(mod2_cs, resType = "n") |>
   plot(alpha = 0.01)
+
+#Here we see autocorrelation has been greatly reduced in this plot compared to default model of correlation structure
 
 ```
 Autocorrelations at all lags are way smaller than before, showing that CS was able to model them well.  
@@ -190,8 +229,10 @@ Nest, let's check the confidence interval on the rho estimate.
 ## interval on rho  
 ```{r}
 
+nlme::intervals(mod2_cs, which = "var-cov")
+
 ```
-The interval of rho includes the value of 0, so not statistically significant, even though it removed the autocorrelation from the residuals.  
+**The interval of rho includes the value of 0, so not statistically significant, even though it removed the autocorrelation from the residuals.**  
 
 Next, let's compare the default model and the CS model.  
 
@@ -216,27 +257,33 @@ Sometimes, AIC and BIC do not agree on which model has the lowest value and thus
 ## comparison  
 ```{r}
 
+stats::anova(mod1_default,mod2_cs)
+nlme::anova.lme(mod1_default,mod2_cs)
 
 ```
 A few things to notice:  
-  - **df column**: this represents the numerator degrees of freedom of a given model. The larger this number, the more parameters are benig estimated.  
-  - **AIC and BIC columns**: the values we see here are specific to these models, and their magnitude is not really meaningull. What we are looking for here is **relative differences** when comparing models.   
+  - **df column**: this represents the numerator degrees of freedom of a given model. The larger this number, the more parameters are being estimated.  
+  - **AIC and BIC columns**: the values we see here are specific to these models, and their magnitude is not really meaningful. What we are looking for here is **relative differences** when comparing models.   
 
 Compared to the default model, the CS model increased fit metrics, demonstrating a poorer fit.  
 
 This is likely because it estimated extra parameters than the default (1 more df consumed), while their inclusion in the model did not help in better explaining the variability (and their sources) in the model. 
 
-Thus, more parameters (more complex model) without a corresponding improvement in model fit generates a model that is less appropriate.  
+Thus, more parameters (more complex model) without a corresponding improvement in model fit generates a model that is less appropriate.
+
+**Note on R-squared vs adjusted R squared - R-squared will always increase as more variables are added, adjusted R squared penalizes additional variables added if they explain very little of the variance!**
 
 # Model 3 - General  
 ```{r}
-mod3_gen <- lme(
+
+mod3_gen <- nlme::lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+  correlation = corSymm(),
   data = rm_rcbd_df)
 
 mod3_gen
+
 ```
 Notice the many different values in the matrix.  
 
@@ -245,23 +292,29 @@ This is the most complex structure, and often times it does not converge (i.e., 
 
 ## empirical autocorrelation function  
 ```{r}
-ACF(mod3_gen, resType = "n") %>%
+
+ACF(mod3_gen, resType = "n") |>
   plot(alpha = 0.01)
+
 ```
 Although smaller compared to the default model, autocorrelation at lag = 1 is just below the significant threshold, but lag = 4 became significant.  
 
 ## interval on rho  
 ```{r}
+
 intervals(mod3_gen, which = "var-cov")
+
 ```
 Unable to calculate intervals on correlation coefficients. 
 
 ## comparison  
 Let's compare all three models.  
 ```{r}
-anova(mod1_default, 
+
+nlme::anova.lme(mod1_default, 
       mod2_cs,
       mod3_gen)
+
 ```
 The general correlation matrix model consumed **6 more dfs** than the default model (to estimate those correlation coefficients we saw above). 
 
