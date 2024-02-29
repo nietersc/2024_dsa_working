@@ -302,7 +302,7 @@ Although smaller compared to the default model, autocorrelation at lag = 1 is ju
 ## interval on rho  
 ```{r}
 
-intervals(mod3_gen, which = "var-cov")
+intervals(mod3_gen, which = "fixed")
 
 ```
 Unable to calculate intervals on correlation coefficients. 
@@ -316,73 +316,109 @@ nlme::anova.lme(mod1_default,
       mod3_gen)
 
 ```
+
 The general correlation matrix model consumed **6 more dfs** than the default model (to estimate those correlation coefficients we saw above). 
 
 This model **decreased AIC** but **increased BIC** compared to the default model. Here's an interesting case where the different metrics do not agree.  
 
 # Model 4 - Autoregressive order 1 (AR1)  
 ```{r}
-mod4_ar1 <- lme(
+
+mod4_ar1 <- nlme::lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
-  data = rm_rcbd_df)
+  correlation = corAR1(form = ~ dap), #unequal intervals between daps use corCAR1 continuous autoregressive
+  data = rm_rcbd_df) #Phi1 = 0, tells us correlation = 0. 
 
 mod4_ar1
+
 ```
+
 Notice how we have a **phi** estimate above, which is the estimated correlation parameter.  
 
 In this case, it was estimated as zero.
 
 ## empirical autocorrelation function  
+
 ```{r}
+
 ACF(mod4_ar1, resType = "n") %>%
   plot(alpha = 0.01)
+
+#very similar to default model 1, mod1 is just assuming correlation = 0. 
+
 ```
 Autocorrelation at lags = 1 and 2 are still significant.
 
 ## intervals  
 ```{r}
+
 intervals(mod4_ar1, which = "var-cov")
+
 ```
 Unable to calculate confidence interval for the estimate of correlation, likely because the estimate was 0.  
 
 ## comparison
 ```{r}
+
 anova(mod1_default, 
       mod2_cs, mod3_gen, mod4_ar1)
+
+#mod 4 consumes degree of freedom, but doesn't improve fit, which increases AIC and BIC
+
 ```
+
 AR1 model had the same dfs and fit metrics as the CS model.  
   
-# Model 5 - Autoregressive order moving average (ARMA11)  
+# Model 5 - Autoregressive order moving average (ARMA11) 
+
 ```{r}
+
 mod5_arma11 <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+  correlation = corARMA(p = 1, q = 1), #q is # of timepoints going back, p is # of lags
   data = rm_rcbd_df)
 
 mod5_arma11
+# has Phi (autoregressive part) and Theta for correlation
+
 ```
+
 Notice how we have a **phi1** and **theta1** estimates above, which are the estimated correlation parameters for this model.  
 
 ## empirical autocorrelation function  
 ```{r}
+
 ACF(mod5_arma11, resType = "n") %>%
   plot(alpha = 0.01)
+#Does not help us fixing or reducing auto correlations according to this plot
+
 ```
+
 Autocorrelation at lags = 1 and 2 are still significant.
 
 ## intervals  
 ```{r}
+
 intervals(mod5_arma11, which = "var-cov")
+#if low and upper includes 0, it is not significantly different than 0
+#this is true for Phi and Theta 
+
 ```
+
 Both estimate intervals include zero, so not significant.  
 
 ## comparison
 ```{r}
+
 anova(mod1_default, 
       mod2_cs, mod3_gen, mod4_ar1, mod5_arma11)
+#has worse fit compared to default as it consumes 2 degrees of freedom for Phi and Theta
+#this gives lower AIC and BIC scores
+
+#these are all serial correlation structures, next we get into spatial correlation data
+
 ```
 ARMA11 consumed 1 more df and overall increased AIC and BIC (poorer fit).  
 
@@ -390,29 +426,39 @@ ARMA11 consumed 1 more df and overall increased AIC and BIC (poorer fit).
 Let's fit our first **spatial** correlation structure.  
 
 ```{r}
+
 mod6_exp <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+  correlation = corExp(form = ~ dap),
   data = rm_rcbd_df)
 
 mod6_exp
+
 ```
 Notice how we have a **range** estimate above, which is the estimated correlation parameter for spatial models.  
 
 ## empirical autocorrelation function  
 ```{r}
+
 ACF(mod6_exp, resType = "n") %>%
   plot(alpha = 0.01)
+
 ```
 Lags 1 and 2 still correlated.  
 
-With spatial correlation structures, we can obtain the semivariogram to inspect model fit.  
+With spatial correlation structures, we can obtain the semivariogram to inspect model fit.
+
+Semivariogram and correlation will be inverse - highly correlated means the distances will be closest to eachother.Range is the point on the x axis where the curve flattens out.
 
 ## variogram  
 ```{r}
+
 Variogram(mod6_exp) %>%
   plot() 
+
+#plot won't show line because it was unable to fit an exponential model to the points as there are few time points, not many distances and they have a relatively flat response shape. 
+
 ```
 A few things to notice:  
   - We only have 4 time points, which creates 3 distances on the semivariogram.  
@@ -423,15 +469,22 @@ A few things to notice:
   
 ## interval on range  
 ```{r}
+
 intervals(mod6_exp, which = "var-cov")
+
+#correlation structure tells in table tells us the plateau will occur somewhere between 0 and 30
+#this encompasses nearly the full range of daps so it's not very useful.
+
 ```
 range interval does not include 0, so it is significant.
 
 ## comparison
 ```{r}
+
 anova(mod1_default, 
       mod2_cs, mod3_gen, mod4_ar1, mod5_arma11,
       mod6_exp)
+
 ```
 Although model 6 (exponential) did fix the autocorrelation issue and had a significant range estimate, it increased fit metrics when compared to other models. 
 
@@ -439,41 +492,57 @@ Thus, our best candidate remains model 3 (general).
 
 # Model 7 - Gaussian  
 ```{r}
+
 mod7_gaus <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+  correlation = corGaus(form = ~ dap),
   data = rm_rcbd_df)
 
 mod7_gaus
+
 ```
 Notice how we have a **range** estimate above, which is the estimated correlation parameter for spatial models.  
 
 ## empirical autocorrelation function  
 ```{r}
+
 ACF(mod7_gaus, resType = "n") %>%
   plot(alpha = 0.01)
+
 ```
 Lags 1 and 2 still correlated.  
 
 ## variogram  
 ```{r}
+
 Variogram(mod7_gaus) %>%
-  plot() 
+  plot()
+
+#again, no fit of the points in the plot
+
 ```
 Same issue as with the exponential, no semivariogram fit.  
 
 ## interval on range  
 ```{r}
+
 intervals(mod7_gaus, which = "var-cov")
+
+#correlation structure is from 6 - 16. Quite wide, but better than previous spatial model
+
 ```
 range interval does not include 0, so it is significant.  
 
 ## comparison
 ```{r}
+
 anova(mod1_default, 
       mod2_cs, mod3_gen, mod4_ar1, mod5_arma11,
       mod6_exp, mod7_gaus)
+
+#still not best model according to AIC and BIC
+
 ```
 Although model 7 (gaussian) had a significant range estimate, it increased fit metrics when compared to other models. 
 
@@ -481,41 +550,56 @@ Thus, our best candidate remains model 3 (general).
 
 # Model 8 - Linear  
 ```{r}
+
 mod8_lin <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+  correlation = corLin(form = ~ dap),
   data = rm_rcbd_df)
 
 mod8_lin
+
 ```
 Notice how we have a **range** estimate above, which is the estimated correlation parameter for spatial models.  
 
 ## empirical autocorrelation function  
 ```{r}
+
 ACF(mod8_lin, resType = "n") %>%
   plot(alpha = 0.01)
+
+#not improving much
+
 ```
 Lags 1 and 2 still correlated.  
 
 ## variogram  
 ```{r}
+
 Variogram(mod8_lin) %>%
   plot() 
+
+#still no fit line
+
 ```
 Same issue as the previous spatial models as far as not fitting the data.  
 
 ## interval on range  
 ```{r}
+
 intervals(mod8_lin, which = "var-cov")
+
 ```
 range interval does not include 0, so it is significant.  
 
 ## comparison
 ```{r}
+
 anova(mod1_default, 
       mod2_cs, mod3_gen, mod4_ar1, mod5_arma11,
       mod6_exp, mod7_gaus, mod8_lin)
+
+#similar to Gaussian response
 
 ```
 Although model 8 (linear) had a significant range estimate, it increased fit metrics when compared to other models, and had same fit metrics as model 7 (gaussian). 
@@ -525,40 +609,54 @@ Thus, our best candidate remains model 3 (general).
 
 # Model 9 - Rational Quadratic  
 ```{r}
+
 mod9_rq <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+  correlation = corRatio(form = ~ dap),
   data = rm_rcbd_df)
 
 mod9_rq
+
 ```
 Notice how we have a **range** estimate above, which is the estimated correlation parameter for spatial models.  
 
 ## empirical autocorrelation function  
 ```{r}
+
 ACF(mod9_rq, resType = "n") %>%
   plot(alpha = 0.01)
+
 ```
 Lags 1 and 2 still correlated.  
 
 ## variogram  
 ```{r}
+
 Variogram(mod9_rq) %>%
-  plot() 
+  plot()
+
+#no fitted line
+
 ```
 
 ## interval on range  
 ```{r}
+
 intervals(mod9_rq, which = "var-cov")
+#intervals don't include 0, but upper limit is 120 which isn't in  our actual dap range
+#^ means this method is not a good fit
+
 ```
 range interval does not include 0, so it is significant, although really wide interval (from 0 to 120).    
 
 ## comparison
 ```{r}
+
 anova(mod1_default, 
       mod2_cs, mod3_gen, mod4_ar1, mod5_arma11,
       mod6_exp, mod7_gaus, mod8_lin, mod9_rq)
+
 ```
 Model 9 (rational quadratic) had a poorer fit compared to other spatial models.  
 
@@ -568,41 +666,55 @@ Thus, our best candidate remains model 3 (general).
 # Model 10 - Spherical  
 
 ```{r}
+
 mod10_sph <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+  correlation = corSpher(form = ~ dap),
   data = rm_rcbd_df)
 
 mod10_sph
+
 ```
 Notice how we have a **range** estimate above, which is the estimated correlation parameter for spatial models.  
 
 ## empirical autocorrelation function  
 ```{r}
+
 ACF(mod10_sph, resType = "n") %>%
   plot(alpha = 0.01)
+
 ```
 Lags 1 and 2 still correlated.  
 
 ## variogram  
 ```{r}
+
 Variogram(mod10_sph) %>%
   plot() 
+
 ```
 No fit like all other spatial models.  
 
 ## interval on range  
 ```{r}
+
 intervals(mod10_sph, which = "var-cov")
+
 ```
-range interval does not include 0, so it is significant.  
+range interval does not include 0, so it is significant. But upper limit is 90 so no bueno
 
 # Final model comparison and selection  
 ```{r}
-anova(mod1_default, 
+
+output <- anova(mod1_default, 
       mod2_cs, mod3_gen, mod4_ar1, mod5_arma11,
-      mod6_exp, mod7_gaus, mod8_lin, mod9_rq, mod10_sph) 
+      mod6_exp, mod7_gaus, mod8_lin, mod9_rq, mod10_sph) |>
+  tibble::rownames_to_column(var = "model_name") |>
+  janitor::clean_names() |>
+  dplyr::select(model_name,model,df,aic,bic) |>
+  dplyr::filter(aic == min(aic) |
+                bic == min(bic))
 
 ```
 After fitting the default model and comparing it to other 9 models that included serial and spatial correlation structures, we found that:  
@@ -621,15 +733,18 @@ Let's assume that the general model was the best, and perform inference on it.
 
 # Checking residuals  
 ```{r}
+
 library(broom.mixed)
 mod3_gen_resid <- augment(mod3_gen) %>%
   mutate(.stdresid=resid(mod3_gen, type="pearson", scaled=T))
 
 mod3_gen_resid
+
 ```
 
 ### Block random effects are iid ~ N(0,var_a)  
 ```{r }
+
 ranef(mod3_gen)[[1]] %>%
   ggplot(aes(sample=`(Intercept)`))+
   stat_qq(  shape = 21,
@@ -646,6 +761,7 @@ ranef(mod3_gen)[[1]] %>%
 
 ### Block:krate random effects are iid ~ N(0,var_b)  
 ```{r }
+
 ranef(mod3_gen)[[2]] %>%
   ggplot(aes(sample=`(Intercept)`))+
   stat_qq(  shape = 21,
@@ -662,6 +778,7 @@ ranef(mod3_gen)[[2]] %>%
 
 ### Block:krate:nrate random effects are iid ~ N(0,var_c)  
 ```{r }
+
 ranef(mod3_gen)[[3]] %>%
   ggplot(aes(sample=`(Intercept)`))+
   stat_qq(  shape = 21,
@@ -678,6 +795,7 @@ ranef(mod3_gen)[[3]] %>%
 
 ### Within-group errors are iid ~ N(0, var_e)  
 ```{r }
+
 ggplot(mod3_gen_resid, aes(x=.fitted, y=.stdresid))+
   geom_hline(yintercept = 0, color="red")+
   geom_point(shape = 21,
@@ -687,9 +805,11 @@ ggplot(mod3_gen_resid, aes(x=.fitted, y=.stdresid))+
   geom_smooth()+
   geom_hline(yintercept = c(-3,3), color = "red")+
   theme_bw()
+
 ```
 
 ```{r}
+
 ggplot(mod3_gen_resid, aes(sample=.stdresid))+
   stat_qq(  shape = 21,
             fill = "purple", 
@@ -709,12 +829,15 @@ We can proceed with inference.
 
 # Inference - correct model  
 ```{r anova}
+
 Anova(mod3_gen, type = 3)
+
 ```
 > Looking at the ANOVA table above, which means would you extract?  
 
 ## K x N x dap interaction  
 ```{r}
+
 rm_rcbd_cld_kndap <- emmeans(mod3_gen, ~fdap|krate_kgha:nrate_kgha) %>%
   cld(reversed = T,
       Letters = letters,
@@ -725,11 +848,13 @@ rm_rcbd_cld_kndap <- emmeans(mod3_gen, ~fdap|krate_kgha:nrate_kgha) %>%
   mutate(trtname = paste0(nrate_kgha,"+",krate_kgha))
 
 rm_rcbd_cld_kndap
+
 ```
 
 ```{r}
 #| fig-width: 15
 #| fig-height: 5
+
 ggplot(mapping = aes(fill = fdap))+
   # Raw data and boxplots  
   geom_boxplot(data = rm_rcbd_df,
@@ -760,12 +885,15 @@ I'm going to skip the code for checking model assumptions for the default model,
 
 # Inference - wrong model  
 ```{r anova}
+
 Anova(mod1_default, type = 3)
+
 ```
 > Take a moment to compare this ANOVA table with that from the general model (the one we ran just prior). Do you see any differences?  
 
 ## K x N x dap interaction  
 ```{r}
+
 rm_rcbd_cld_kndap_wrong <- emmeans(mod1_default, 
                                    ~fdap|krate_kgha:nrate_kgha) %>%
   cld(reversed = T,
@@ -777,11 +905,13 @@ rm_rcbd_cld_kndap_wrong <- emmeans(mod1_default,
   mutate(trtname = paste0(nrate_kgha,"+",krate_kgha))
 
 rm_rcbd_cld_kndap_wrong
+
 ```
 
 ```{r}
 #| fig-width: 15
 #| fig-height: 5
+
 ggplot(mapping = aes(fill = fdap))+
   # Raw data and boxplots  
   geom_boxplot(data = rm_rcbd_df,
