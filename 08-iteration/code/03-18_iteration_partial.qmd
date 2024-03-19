@@ -66,24 +66,39 @@ Here is where we load the packages we will use.
 library(tidyverse) # for data wrangling and plotting
 library(janitor) # clean column names
 library(knitr) # for figure displaying
+library(nlraa)
+
 ```
 
 Reading data.  
 ```{r}
 #| message: false
 
-nematode
+nematode <- read_csv("../data/nematode_rs.csv",
+                     show_col_types = F)
 
 nematode
+
 ```
   
 # 2) EDA  
 ```{r summary}
+
 summary(nematode)
+
 ```
 
 ```{r density plot} 
-nematode 
+
+nematode_long <- nematode |>
+  pivot_longer(
+    -c(site,sampleid)
+  )
+
+nematode_long |>
+  ggplot()+
+  geom_density(aes(x = value))+
+  facet_wrap(~name, scales = "free")
 
 ```
 
@@ -98,13 +113,21 @@ where **nir** is reflectance from the near-infrared band, and **vis** is reflect
 One example of creating ndvi for the nir and red bands would be:  
 
 ```{r}
-nematode
+
+nematode |>
+  mutate(
+    rndvi = (nir - r)/(nir + r)
+  )
+
 ```
 
 Since we're going to calculate this for each of the visible-region bands (5 in total), **let's write a function so we avoid some code repetition**.  
 
 ```{r ndvi function}
-ndvi 
+
+ndvi <- function(nir,vis){
+  (nir - vis) / (nir + vis)
+}
 
 ```
 
@@ -118,27 +141,38 @@ The function **returns** a vector with the result of the ndvi calculation using 
 Let's see how that would compare to the previous step:  
 
 ```{r}
-nematode 
+
+nematode  |>
+  mutate(rndvi = ndvi(nir,r),
+         bndvi = ndvi(nir,b),
+         gndvi = ndvi(nir,g))
 
 ```
 
 Now that we created a function to help with one type of vegetation index, let's go ahead and compute all 10 different ones.  
 
 ```{r}
-nematode_w <- nematode 
-  # Calculating ndvi-based indices
-  
 
+nematode_w <- nematode |>
+    mutate(
+      rndvi = ndvi(nir,r),
+      bndvi = ndvi(nir,b),
+      gndvi = ndvi(nir,g),
+      rendvi = ndvi(nir,re)
+      ) |>
+
+  # Calculating ndvi-based indices
   # Calculating other non-ndvi-based indices
   # For reference, see paper.
-  #mutate(sr = nir/r,
-  #       rdvi = ((nir-r)/(nir+r))^2,
-  #       savi = (((1+0.5)*(nir-r))/(nir+r+0.16)),
-  #       vari = (g-r)/(g+r-b),
-  #       evi = 2.5*(nir-r)/(nir+(6*r)-(7.5*b))+1,
-  #       nli=  ((nir^2)-r)/((nir^2)+r))
+  mutate(sr = nir/r,
+        rdvi = ((nir-r)/(nir+r))^2,
+        savi = (((1+0.5)*(nir-r))/(nir+r+0.16)),
+        vari = (g-r)/(g+r-b),
+        evi = 2.5*(nir-r)/(nir+(6*r)-(7.5*b))+1,
+        nli=  ((nir^2)-r)/((nir^2)+r))
 
-nematode_w 
+nematode_w
+
 ```
 
 # 4) Function writing - CV
@@ -148,23 +182,28 @@ Let's write a function to return to us the mean and coefficient of variation. If
 
 First, a function for CV.  
 ```{r}
-meancv 
+
+meancv <- function(x){
   # Calculate intermediary steps of mean and sd
-
+  mean <- mean(x, na.rm = T)
+  sd <- sd(x, na.rm = T)
   # Calculate cv
-
+  cv <- (sd/mean)*100
   # Combine them into a data frame
-
+  df <- data.frame(mean = mean,
+                   cv = cv)
   # Return the data frame
+  return(df)
+}
   
-  
-
 
 meancv
 ```
 
 Let's apply it to one of the vegetation indices  
 ```{r}
+
+meancv(nematode_w$rndvi)
 
 ```
 
