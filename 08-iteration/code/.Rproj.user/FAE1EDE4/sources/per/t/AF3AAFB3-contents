@@ -1,0 +1,2893 @@
+---
+title: "VF Trial 07 Analysis"
+author: "Chris Nieters"
+date: Sys.Date()
+editor_options:
+  chunk_output_type: console
+format:
+  html:
+    code-fold: false
+    embed-resources: true
+    toc: true
+    number-sections: false
+    theme: cerulean
+---
+
+```{r setup}
+#| warning: false
+#| message: false
+#| echo: false
+
+### Load libraries
+library(tidyverse)
+library(googlesheets4)
+library(ggpubr)
+library(ggsci)
+library(car)
+library(broom) # for model residuals extraction
+library(broom.mixed)
+library(emmeans) # for model mean extraction
+library(multcomp)
+library(nlme)
+
+#import custom functions
+map(list.files("code/functions",pattern = "(.R)",full.names = TRUE),source)
+
+```
+
+# Trial key
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+trial_key <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Key",
+              col_types = c("c")) %>%
+    mutate_at(vars(Transplant_Date), lubridate::as_date) %>%
+    mutate_at(vars(Tray), as.numeric) %>%
+  mutate(
+    NSMS = case_when(
+      NSMS == "1" ~ "DRAIN",
+      NSMS == "2" ~ "FULL",
+      NSMS == "3" ~ "EC",
+      NSMS == "4" ~ "HALF",
+      NSMS == "5" ~ "WUE",
+      NSMS == "6" ~ "LAB"),
+      .keep = "unused",
+    NSMS = fct_relevel(NSMS, "DRAIN","FULL","HALF","EC",
+                                     "WUE","LAB"))
+
+```
+
+# Refill
+## Treatment #6
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+ns_levels <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "NS Level",
+              col_types = c("c")) %>%
+    mutate_at(vars(9:12, Tray), as.numeric) %>%
+    mutate(
+      Date = lubridate::as_date(Date))
+
+
+t6_refill <- calc_nsms6(ns_levels, trial_key,
+                        Trial = 7,
+                        Timepoint = 3,
+                       Harvest_Days = 7,
+                       Refill_Days = 4)|>
+  mutate(Treatment = "6")
+
+
+t5_refill <- calc_nsms5(ns_levels, trial_key,
+                        harvest,Timepoint = 3,
+                        Harvest_Days = 7,
+                       Refill_Days = 4) |>
+  mutate(Treatment = "5")
+ 
+ 
+combined3 <- t5_refill |>
+  full_join(t6_refill) |>
+  mutate(
+    timepoint = 3
+  )
+
+combined1 |> full_join(combined2) |> full_join(combined3) |>
+  make_sick_datatable()
+
+
+t6_refill %>%
+  dplyr::filter(uL_to_Add > 0,
+                !Fertilizer == "NH4Mo") |>
+  ggplot(aes(x = PPFD, y = uL_to_Add,
+             color = Fertilizer, label = uL_to_Add))+
+  geom_point(shape = 1, size = 12)+
+  geom_text(size = 3)+
+  facet_wrap(~Fertilizer, scales = "free")+
+  theme(legend.position = "none")
+
+
+```
+
+## Treatment #5
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# harvest <- googlesheets4::read_sheet(
+#     "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+#               sheet = "Harvest",
+#               col_types = c("c")) %>%
+#   mutate_at(vars(4:9), as.numeric) %>%
+#   mutate_at(vars(Date), lubridate::as_date) 
+# 
+# 
+# t5_refill <- calc_nsms5(ns_levels, trial_key,
+#                         harvest,Timepoint = 3,
+#                         Harvest_Days = 7,
+#                        Refill_Days = 4) |>
+#   mutate(Treatment = "5")
+# 
+# t5_refill |>
+#   dplyr::filter(uL_to_Add > 0,
+#                 !Fertilizer == "NH4Mo") |>
+#   ggplot(aes(x = PPFD, y = uL_to_Add,
+#              color = Fertilizer, label = uL_to_Add))+
+#   geom_point(shape = 1, size = 12)+
+#   geom_text(size = 3)+
+#   facet_wrap(~Fertilizer, scales = "free")+
+#   theme(legend.position = "none")
+
+```
+## Combined Refill Plot
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# combined <- t5_refill |>
+#   full_join(t6_refill)
+# 
+# combined |>
+#   dplyr::filter(uL_to_Add > 0,
+#                 !Fertilizer == "NH4Mo") |>
+#   ggplot(aes(x = PPFD, y = uL_to_Add,
+#              color = Treatment, label = uL_to_Add))+
+#   geom_point(shape = 1, size = 12)+
+#   geom_text(size = 3)+
+#   facet_wrap(~Fertilizer, scales = "free")+
+#   theme(legend.position = "bottom")
+
+```
+
+# Harvest
+
+## Import data
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+#raw data
+harvest_raw <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Harvest",
+              col_types = c("c")) %>%
+  mutate_at(vars(4:15), as.numeric) %>%
+  mutate_at(vars(Date), lubridate::as_date) 
+
+
+#joined data
+harvest <- trial_key %>%
+  full_join(harvest_raw, multiple = "all") |>
+  dplyr::filter(!Tub_ID == "0",
+                Timepoint %in% c("2","4")) |>
+  mutate(
+    DAT = as.numeric(Date - Transplant_Date),
+    FDAT = factor(DAT),
+    RS_Ratio = Dry_Root/Dry_Canopy,
+    SLW = Dry_Canopy/Leaf_Area) %>%
+  dplyr::select(DAT,FDAT,c(1:23), RS_Ratio, SLW) |>
+  mutate_at(vars(PPFD,Code),
+            as.factor)
+
+harvest_2 <- harvest |>
+  dplyr::filter(Timepoint == 2)
+
+harvest_4 <- harvest |>
+  dplyr::filter(Timepoint == 4)
+
+#wrangled data
+harvest_long <- harvest %>%
+  pivot_longer(
+    -c(1:14),
+    names_to = "metric",
+    values_to = "value"
+  )
+
+
+```
+
+## EDA plots
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+harvest_long |>
+  ggplot(aes(x = Code, y = value, fill = Code))+
+  geom_boxplot()+
+  facet_wrap(DAT~metric, scales = "free")
+
+harvest_long |>
+  filter(metric == "Fresh_Canopy") |>
+  ggplot(aes(x = Code, y = value, fill = Code))+
+  geom_boxplot()+
+  facet_grid(DAT~PPFD, scales = "free")
+
+
+```
+
+### Model selection
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+
+# Changing to sum-to-zero contrast
+# options(contrasts = c("contr.sum", "contr.poly"))
+# 
+# mod0 <- lm(data = harvest_4,
+#            Fresh_Canopy ~ Rack + Code*PPFD)
+# 
+# car::Anova(mod0, type = 3)
+# 
+# 
+# mod1 <- nlme::lme(data = harvest,
+#           Fresh_Canopy ~ Code*PPFD*FDAT,
+#           random = ~ 1 | PPFD/Code,
+#           correlation = corCompSymm(form = ~ DAT))
+# 
+# nlme::ACF(mod1, resType = "n") |>
+#   plot(alpha = 0.01)
+# 
+# car::Anova(mod1, type = 3)
+# 
+# mod2 <- nlme::lme(data = harvest,
+#           Fresh_Canopy ~ Code*PPFD*FDAT,
+#           random = ~ 1 | PPFD/Code,
+#           correlation = corSymm())
+# 
+# nlme::ACF(mod2, resType = "n") |>
+#   plot(alpha = 0.01)
+# 
+# car::Anova(mod2, type = 3)
+# 
+# mod3 <-   nlme::lme(
+#           data = harvest,
+#           Fresh_Canopy ~ Code*PPFD*FDAT,
+#           random = ~ 1 | PPFD/Code)
+# 
+# car::Anova(mod2, type = 3)
+# 
+# nlme::ACF(mod3, resType = "n") |>
+#   plot(alpha = 0.01)
+# 
+# 
+# 
+# nlme::anova.lme(mod1,mod2,mod3)
+# 
+# #cld = compact letter display
+# em2 <- emmeans(mod2, ~ FDAT|PPFD:Code)
+# 
+# 
+# cld2 <- cld(
+#   em2,
+#   reversed = T,
+#   Letters = letters,
+#   adjust = "none") |>
+#   as.data.frame() %>%
+#   mutate(letter = trimws(.group)) %>%
+#   mutate(trtname = paste0(Code,"+",PPFD))
+# 
+# harvest |>
+#   ggplot(aes(x = Code, y = Fresh_Canopy, color = Code,
+#              fill = Code))+
+#   geom_boxplot() +
+#   facet_grid(FDAT~PPFD, scales = "free")+
+#   geom_label(data = cld2,
+#             aes(label = letter, x = Code, y = emmean),
+#             fill = "white")
+
+```
+## Tidymodels workflow
+
+### Harvest 2
+
+#### Tidy test
+```{r}
+
+harvest_mod <- harvest_long |>
+  filter(!metric %in% c("Healthy_Count","TB_Count","CL_Count"))
+
+tidy_2 <- harvest_mod |>
+  dplyr::filter(DAT == 14) |>
+  group_by(metric) |>
+  nest() |>
+  mutate(mod = map(data, ~lm(value ~ Rack + Code*PPFD, data = .x)),
+         anova = map(data, ~car::Anova(lm(value ~ Rack + Code*PPFD,.), type = 3)),
+         tidy = map(anova, broom::tidy),
+         emmeans = map2(mod, data, ~emmeans(.x,~Code*PPFD, data = .y)),
+         cld = map2(emmeans, data, ~ cld(.x,
+                                   reversed = T,
+                                   Letters = letters,
+                                   adjust = "none",
+                                   data =  .y)))|>
+  unnest(cols = tidy) |>
+  mutate(p.value = round(p.value,6)) |>
+  dplyr::select(metric,term, p.value)|>
+  dplyr::filter(!term %in% c("(Intercept)","Residuals", "Rack"),
+                p.value < 0.15)
+
+tidy_2
+
+```
+
+#### PPFD plots
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+cld_PPFD <- harvest_mod |>
+  dplyr::filter(DAT == 14) |>
+  group_by(metric) |>
+  nest() |>
+  mutate(mod = map(data, ~lm(value ~ Rack + PPFD, data = .x)),
+         anova = map(data, ~car::Anova(lm(value ~ Rack + PPFD,.), type = 3)),
+         tidy = map(anova, broom::tidy),
+         emmeans = map2(mod, data, ~emmeans(.x,~PPFD, data = .y)),
+         cld = map2(emmeans, data, ~ cld(.x,
+                                   reversed = F,
+                                   Letters = letters,
+                                   adjust = "none",
+                                   data =  .y)))|>
+  unnest(cols = cld) |>
+  mutate(letter = trimws(.group)) |>
+  dplyr::select(metric, PPFD, emmean, SE, letter) |>
+  dplyr::filter(
+                metric %in% c("Fresh_Canopy",
+                              "Dry_Canopy",
+                              "Fresh_Root",
+                              "Dry_Root")) 
+
+
+means_2_PPFD <- harvest_long |>
+  dplyr::filter(DAT == 14,
+                metric %in% c("Fresh_Canopy",
+                              "Dry_Canopy",
+                              "Fresh_Root",
+                              "Dry_Root")) |>
+  group_by(metric,PPFD) |>
+  summarise(
+    mean = mean(value),
+    sd = sd(value),
+    n = length(value),
+    se = sd / sqrt(n)
+  )
+
+met_labs <- c("Fresh canopy biomass (g)",
+              "Dry canopy biomass (g)",
+              "Fresh root biomass (g)",
+              "Dry root biomass (g)")
+
+names(met_labs) <- c("Fresh_Canopy",
+                     "Dry_Canopy",
+                     "Fresh_Root",
+                     "Dry_Root")
+
+ggplot()+
+  geom_pointrange(
+    data = means_2_PPFD,
+    linewidth = 0.8,
+    aes(
+    x = PPFD,
+    y = mean,
+    ymin = mean - se,
+    ymax = mean + se,
+    color = PPFD
+  ))+
+  geom_point(data = means_2_PPFD,
+             aes(x = PPFD,
+                 y = mean),
+             color = "black",
+             shape = 21,
+             size = 2.5)+
+  geom_label(
+    data = cld_PPFD,
+    hjust = 1.6,
+    fill = NA,
+    color = "black",
+    label.size = NA,
+    aes(x = PPFD, y = emmean,
+        label = letter))+
+  facet_wrap(~metric, scales = "free",
+             labeller = labeller(metric = met_labs))+
+    theme(
+      panel.grid.major.x = element_blank(),
+      panel.spacing = unit(1, "lines"),
+      panel.background = element_rect(
+        fill = 'grey90'),
+      strip.background = element_rect(
+        fill = "grey27"),
+      strip.text = element_text(
+        size = 10,
+        face = "bold",
+        color = "white"),
+      axis.title.y = element_blank(),
+      # axis.title.y = element_text(
+      #   size = 14,
+      #   face = "bold",
+      #   margin = margin(r = 20)),
+      axis.title.x = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(t = 20)),
+      axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      axis.text.x = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.position = "none")+
+   ylab("Value")+
+   xlab("PPFD (µmol/m^2/s)")+
+   scale_fill_npg()+
+   scale_color_npg()
+
+```
+
+#### PPFD*Code plots
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+ppfd_labs <- c("250 µmol/m^2/s",
+              "500 µmol/m^2/s",
+              "750 µmol/m^2/s")
+
+names(ppfd_labs) <- c(250,
+                     500,
+                     750)
+
+
+cld_Pct_CL <-  harvest_mod |>
+  dplyr::filter(DAT == 14) |>
+  group_by(metric) |>
+  nest() |>
+  mutate(mod = map(data, ~lm(value ~ Rack + Code*PPFD, data = .x)),
+         anova = map(data, ~car::Anova(lm(value ~ Rack + Code*PPFD,.), type = 3)),
+         tidy = map(anova, broom::tidy),
+         emmeans = map2(mod, data, ~emmeans(.x,~PPFD*Code, data = .y)),
+         cld = map2(emmeans, data, ~ cld(.x,
+                                   reversed = F,
+                                   Letters = letters,
+                                   adjust = "none",
+                                   data =  .y)))|>
+  unnest(cols = cld) |>
+  mutate(letter = trimws(.group)) |>
+  dplyr::select(metric, Code, PPFD, emmean, SE, letter) |>
+  dplyr::filter(
+                metric %in% c("Pct_CL"))
+
+
+means_2_Pct_CL <- harvest_long |>
+  dplyr::filter(DAT == 14,
+                metric %in% c("Pct_CL")) |>
+  group_by(metric,PPFD, Code) |>
+  summarise(
+    mean = mean(value),
+    sd = sd(value),
+    n = length(value),
+    se = sd / sqrt(n)
+  )
+
+ggplot()+
+geom_pointrange(
+    data = means_2_Pct_CL,
+    linewidth = 0.8,
+    aes(
+    x = Code,
+    y = mean,
+    ymin = mean - se,
+    ymax = mean + se,
+    color = Code
+  ))+
+  geom_point(data = means_2_Pct_CL,
+             aes(x = Code,
+                 y = mean),
+             color = "black",
+             shape = 21,
+             size = 2.5)+
+  geom_label(
+    data = cld_Pct_CL,
+    vjust = -1,
+    color = "black",
+    label.size = NA,
+    aes(x = Code, y = emmean,
+        label = letter))+
+  facet_wrap(~PPFD,
+             labeller = labeller(PPFD = ppfd_labs))+
+    theme(
+      panel.spacing = unit(1, "lines"),
+      panel.background = element_rect(
+        fill = 'grey90'),
+      strip.background = element_rect(
+        fill = "grey27"),
+      strip.text = element_text(
+        size = 10,
+        face = "bold",
+        color = "white"),
+      axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 20)),
+      axis.title.x = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(t = 20)),
+      axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      axis.text.x = element_text(
+        margin = margin(t = 5),
+        angle = 45,
+        size = 10,
+        face = "bold"),
+      legend.position = "none")+
+   ylab("Chlorosis (%)")+
+   xlab("Nutrient solution management strategy")+
+   scale_fill_npg()+
+   scale_color_npg()
+
+
+cld_SLW <-  harvest_mod |>
+  dplyr::filter(DAT == 14) |>
+  group_by(metric) |>
+  nest() |>
+  mutate(mod = map(data, ~lm(value ~ Rack + Code*PPFD, data = .x)),
+         anova = map(data, ~car::Anova(lm(value ~ Rack + Code*PPFD,.), type = 3)),
+         tidy = map(anova, broom::tidy),
+         emmeans = map2(mod, data, ~emmeans(.x,~PPFD*Code, data = .y)),
+         cld = map2(emmeans, data, ~ cld(.x,
+                                   reversed = F,
+                                   Letters = letters,
+                                   adjust = "none",
+                                   data =  .y)))|>
+  unnest(cols = cld) |>
+  mutate(letter = trimws(.group)) |>
+  dplyr::select(metric, Code, PPFD, emmean, SE, letter) |>
+  dplyr::filter(
+                metric %in% c("SLW"))
+
+
+means_2_SLW <- harvest_long |>
+  dplyr::filter(DAT == 14,
+                metric %in% c("SLW")) |>
+  group_by(metric,PPFD, Code) |>
+  summarise(
+    mean = mean(value),
+    sd = sd(value),
+    n = length(value),
+    se = sd / sqrt(n)
+  )
+
+
+ggplot()+
+geom_pointrange(
+    data = means_2_SLW,
+    linewidth = 0.8,
+    aes(
+    x = Code,
+    y = mean,
+    ymin = mean - se,
+    ymax = mean + se,
+    color = Code
+  ))+
+  geom_point(data = means_2_SLW,
+             aes(x = Code,
+                 y = mean),
+             color = "black",
+             shape = 21,
+             size = 2.5)+
+  geom_label(
+    data = cld_SLW,
+    vjust = -0.8,
+    color = "black",
+    label.size = NA,
+    size = 3.5,
+    aes(x = Code, y = emmean,
+        label = letter))+
+  facet_wrap(~PPFD,
+             labeller = labeller(PPFD = ppfd_labs))+
+    theme(
+      panel.spacing = unit(1, "lines"),
+      panel.background = element_rect(
+        fill = 'grey90'),
+      strip.background = element_rect(
+        fill = "grey27"),
+      strip.text = element_text(
+        size = 10,
+        face = "bold",
+        color = "white"),
+      axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 20)),
+      axis.title.x = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(t = 20)),
+      axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      axis.text.x = element_text(
+        margin = margin(t = 5),
+        angle = 45,
+        size = 10,
+        face = "bold"),
+      legend.position = "none")+
+   ylab("Specific leaf weight (g/cm^2)")+
+   xlab("Nutrient solution management strategy")+
+   scale_fill_npg()+
+   scale_color_npg()
+
+```
+
+### Harvest 4
+
+#### Tidy test
+```{r}
+
+tidy_4 <- harvest_mod |>
+  dplyr::filter(DAT == 28) |>
+  group_by(metric) |>
+  nest() |>
+  mutate(mod = map(data, ~lm(value ~ Rack + Code*PPFD, data = .x)),
+         anova = map(data, ~car::Anova(lm(value ~ Rack + Code*PPFD,.), type = 3)),
+         tidy = map(anova, broom::tidy)) |>
+  unnest(cols = tidy)|>
+  dplyr::select(metric,term,p.value)|>
+  mutate(p.value = round(p.value,6)) |>
+  filter(p.value < 0.11,
+         !term %in% c("(Intercept)","Rack"))
+
+tidy_4
+
+```
+
+#### PPFD plots
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+harvest_mod <- harvest_long |>
+  filter(!metric %in% c("Healthy_Count","TB_Count","CL_Count"))
+
+
+cld_PPFD <- harvest_mod |>
+  dplyr::filter(DAT == 28) |>
+  group_by(metric) |>
+  nest() |>
+  mutate(mod = map(data, ~lm(value ~ Rack + PPFD, data = .x)),
+         anova = map(data, ~car::Anova(lm(value ~ Rack + PPFD,.), type = 3)),
+         tidy = map(anova, broom::tidy),
+         emmeans = map2(mod, data, ~emmeans(.x,~PPFD, data = .y)),
+         cld = map2(emmeans, data, ~ cld(.x,
+                                   reversed = F,
+                                   Letters = letters,
+                                   adjust = "none",
+                                   data =  .y)))|>
+  unnest(cols = cld) |>
+  mutate(letter = trimws(.group)) |>
+  dplyr::select(metric, PPFD, emmean, SE, letter) |>
+  dplyr::filter(
+                metric %in% c("Fresh_Canopy",
+                              "Dry_Canopy",
+                              "Fresh_Root",
+                              "Dry_Root",
+                              "Leaf_Area",
+                              "SLW",
+                              "Pct_CL",
+                              "Pct_TB")) 
+
+
+
+means_4_PPFD <- harvest_long |>
+  dplyr::filter(DAT == 28,
+                metric %in% c("Fresh_Canopy",
+                              "Dry_Canopy",
+                              "Fresh_Root",
+                              "Dry_Root",
+                              "Leaf_Area",
+                              "SLW",
+                              "Pct_CL",
+                              "Pct_TB")) |>
+  group_by(metric,PPFD) |>
+  summarise(
+    mean = mean(value),
+    sd = sd(value),
+    n = length(value),
+    se = sd / sqrt(n)
+  )
+
+met_labs <- c("Fresh canopy biomass (g)",
+              "Dry canopy biomass (g)",
+              "Fresh root biomass (g)",
+              "Dry root biomass (g)",
+              "Leaf area (cm^2)",
+              "SLW (g/cm^2)",
+              "Chlorosis (%)",
+              "Tipburn (%)")
+
+names(met_labs) <- c("Fresh_Canopy",
+                     "Dry_Canopy",
+                     "Fresh_Root",
+                     "Dry_Root",
+                     "Leaf_Area",
+                     "SLW",
+                     "Pct_CL",
+                     "Pct_TB")
+
+ggplot()+
+  geom_pointrange(
+    data = means_4_PPFD,
+    linewidth = 0.8,
+    aes(
+    x = PPFD,
+    y = mean,
+    ymin = mean - se,
+    ymax = mean + se,
+    color = PPFD
+  ))+
+  geom_point(data = means_4_PPFD,
+             aes(x = PPFD,
+                 y = mean),
+             color = "black",
+             shape = 21,
+             size = 2.5)+
+  geom_label(
+    data = cld_PPFD,
+    hjust = 1.6,
+    fill = NA,
+    color = "black",
+    label.size = NA,
+    aes(x = PPFD, y = emmean,
+        label = letter))+
+  facet_wrap(~metric, scales = "free",
+             labeller = labeller(metric = met_labs),
+             nrow = 2)+
+    theme(
+      panel.grid.major.x = element_blank(),
+      panel.spacing = unit(1, "lines"),
+      panel.background = element_rect(
+        fill = 'grey90'),
+      strip.background = element_rect(
+        fill = "grey27"),
+      strip.text = element_text(
+        size = 10,
+        face = "bold",
+        color = "white"),
+      axis.title.y = element_blank(),
+      # axis.title.y = element_text(
+      #   size = 14,
+      #   face = "bold",
+      #   margin = margin(r = 20)),
+      axis.title.x = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(t = 20)),
+      axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      axis.text.x = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.position = "none")+
+   ylab("Value")+
+   xlab("PPFD (µmol/m^2/s)")+
+   scale_fill_npg()+
+   scale_color_npg()
+
+
+ppfd_labs <- c("250 µmol/m^2/s",
+              "500 µmol/m^2/s",
+              "750 µmol/m^2/s")
+
+names(ppfd_labs) <- c(250,
+                     500,
+                     750)
+
+
+cld_Pct_CL <-  harvest_mod |>
+  dplyr::filter(DAT == 28) |>
+  group_by(metric) |>
+  nest() |>
+  mutate(mod = map(data, ~lm(value ~ Rack + Code*PPFD, data = .x)),
+         anova = map(data, ~car::Anova(lm(value ~ Rack + Code*PPFD,.), type = 3)),
+         tidy = map(anova, broom::tidy),
+         emmeans = map2(mod, data, ~emmeans(.x,~PPFD*Code, data = .y)),
+         cld = map2(emmeans, data, ~ cld(.x,
+                                   reversed = F,
+                                   Letters = letters,
+                                   adjust = "none",
+                                   data =  .y)))|>
+  unnest(cols = cld) |>
+  mutate(letter = trimws(.group)) |>
+  dplyr::select(metric, Code, PPFD, emmean, SE, letter) |>
+  dplyr::filter(
+                metric %in% c("Pct_CL"))
+
+
+means_2_Pct_CL <- harvest_long |>
+  dplyr::filter(DAT == 28,
+                metric %in% c("Pct_CL")) |>
+  group_by(metric,PPFD, Code) |>
+  summarise(
+    mean = mean(value),
+    sd = sd(value),
+    n = length(value),
+    se = sd / sqrt(n)
+  )
+
+ggplot()+
+geom_pointrange(
+    data = means_2_Pct_CL,
+    linewidth = 0.8,
+    aes(
+    x = Code,
+    y = mean,
+    ymin = mean - se,
+    ymax = mean + se,
+    color = Code
+  ))+
+  geom_point(data = means_2_Pct_CL,
+             aes(x = Code,
+                 y = mean),
+             color = "black",
+             shape = 21,
+             size = 2.5)+
+  geom_label(
+    data = cld_Pct_CL,
+    vjust = -1,
+    color = "black",
+    label.size = NA,
+    aes(x = Code, y = emmean,
+        label = letter))+
+  facet_wrap(~PPFD,
+             labeller = labeller(PPFD = ppfd_labs))+
+    theme(
+      panel.spacing = unit(1, "lines"),
+      panel.background = element_rect(
+        fill = 'grey90'),
+      strip.background = element_rect(
+        fill = "grey27"),
+      strip.text = element_text(
+        size = 10,
+        face = "bold",
+        color = "white"),
+      axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 20)),
+      axis.title.x = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(t = 20)),
+      axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      axis.text.x = element_text(
+        margin = margin(t = 5),
+        angle = 45,
+        size = 10,
+        face = "bold"),
+      legend.position = "none")+
+   ylab("Chlorosis presence (% of total)")+
+   xlab("Nutrient solution management strategy")+
+   scale_fill_npg()+
+   scale_color_npg()
+
+cld_SLW <-  harvest_mod |>
+  dplyr::filter(DAT == 14) |>
+  group_by(metric) |>
+  nest() |>
+  mutate(mod = map(data, ~lm(value ~ Rack + Code*PPFD, data = .x)),
+         anova = map(data, ~car::Anova(lm(value ~ Rack + Code*PPFD,.), type = 3)),
+         tidy = map(anova, broom::tidy),
+         emmeans = map2(mod, data, ~emmeans(.x,~PPFD*Code, data = .y)),
+         cld = map2(emmeans, data, ~ cld(.x,
+                                   reversed = F,
+                                   Letters = letters,
+                                   adjust = "none",
+                                   data =  .y)))|>
+  unnest(cols = cld) |>
+  mutate(letter = trimws(.group)) |>
+  dplyr::select(metric, Code, PPFD, emmean, SE, letter) |>
+  dplyr::filter(
+                metric %in% c("SLW"))
+
+
+means_2_SLW <- harvest_long |>
+  dplyr::filter(DAT == 14,
+                metric %in% c("SLW")) |>
+  group_by(metric,PPFD, Code) |>
+  summarise(
+    mean = mean(value),
+    sd = sd(value),
+    n = length(value),
+    se = sd / sqrt(n)
+  )
+
+
+ggplot()+
+geom_pointrange(
+    data = means_2_SLW,
+    linewidth = 0.8,
+    aes(
+    x = Code,
+    y = mean,
+    ymin = mean - se,
+    ymax = mean + se,
+    color = Code
+  ))+
+  geom_point(data = means_2_SLW,
+             aes(x = Code,
+                 y = mean),
+             color = "black",
+             shape = 21,
+             size = 2.5)+
+  geom_label(
+    data = cld_SLW,
+    vjust = -0.8,
+    color = "black",
+    label.size = NA,
+    size = 3.5,
+    aes(x = Code, y = emmean,
+        label = letter))+
+  facet_wrap(~PPFD,
+             labeller = labeller(PPFD = ppfd_labs))+
+    theme(
+      panel.spacing = unit(1, "lines"),
+      panel.background = element_rect(
+        fill = 'grey90'),
+      strip.background = element_rect(
+        fill = "grey27"),
+      strip.text = element_text(
+        size = 10,
+        face = "bold",
+        color = "white"),
+      axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 20)),
+      axis.title.x = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(t = 20)),
+      axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      axis.text.x = element_text(
+        margin = margin(t = 5),
+        angle = 45,
+        size = 10,
+        face = "bold"),
+      legend.position = "none")+
+   ylab("Specific leaf weight (SLW)")+
+   xlab("Nutrient solution management strategy")+
+   scale_fill_npg()+
+   scale_color_npg()
+
+```
+
+# Nutrient Solution
+
+## Conditions Import
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+ec_ph_temp_raw <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "EC pH Temp",
+              col_types = c("c")) %>%
+    mutate_at(vars(8:13, Tray), as.numeric) %>%
+    mutate(
+      Date = lubridate::as_date(Date))
+
+ec_ph_temp <- ec_ph_temp_raw %>%
+  full_join(trial_key) %>%
+  mutate_at(vars(7:10,12), as.numeric) %>%
+  mutate(
+    DAT = Date - Transplant_Date,
+    FDAT = as.factor(DAT)) |>
+  mutate_at(vars(NSMS,PPFD,Rack), as.factor)
+
+
+do_raw <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "DO",
+              col_types = c("c")) %>%
+    mutate_at(vars(DO, Tray), as.numeric) %>%
+    mutate(
+      Date = lubridate::as_date(Date))
+
+do <- do_raw |>
+  full_join(trial_key) %>%
+  mutate(
+    DAT = Date - Transplant_Date,
+    FDAT = as.factor(DAT))|>
+  mutate_at(vars(NSMS,PPFD,Rack), as.factor)
+
+
+
+```
+## EC pH Temp
+
+## EDA
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+ec_ph_temp |>
+  ggplot(aes(x = Date, y = pH, color = NSMS))+
+  geom_point()+
+  geom_smooth(se = F)
+
+ec_ph_temp |>
+  ggplot(aes(x = Date, y = EC, color = NSMS))+
+  geom_point()+
+  geom_smooth(se = F)
+
+ec_ph_temp |>
+  ggplot(aes(x = Date, y = Temp, color = NSMS))+
+  geom_point()+
+  geom_smooth(se = F)
+
+
+
+```
+
+### Tidymodels
+```{r}
+
+ec_ph_temp_long <- ec_ph_temp |>
+  pivot_longer(
+    c(EC,pH,Temp),
+    names_to = "metric",
+    values_to = "value")
+
+do_long <- do |>
+  pivot_longer(
+    DO,
+    names_to = "metric",
+    values_to = "value")
+
+
+ec_ph_temp_mod <- ec_ph_temp_long |>
+  dplyr::select(Rack,DAT,PPFD,NSMS,metric,value)
+
+
+do_mod <- do_long |>
+  dplyr::select(Rack,DAT,PPFD,NSMS,metric,value)
+
+
+tidy1 <- ec_ph_temp_mod |>
+  group_by(metric,DAT) |>
+  nest() |>
+  mutate(mod = map(data, ~lm(value ~ Rack + NSMS*PPFD, data = .x)),
+         anova = map(data, ~car::Anova(lm(value ~ Rack + NSMS*PPFD,.), type = 3)),
+         tidy = map(anova, broom::tidy),
+         emmeans = map2(mod, data, ~emmeans(.x,~NSMS*PPFD, data = .y)),
+         cld = map2(emmeans, data, ~ cld(.x,
+                                   reversed = T,
+                                   Letters = letters,
+                                   adjust = "none",
+                                   data =  .y)))|>
+  unnest(cols = tidy) |>
+  mutate(p.value = round(p.value,6)) |>
+  dplyr::select(metric,term, p.value) |>
+  dplyr::filter(!term %in% c("(Intercept)","Residuals", "Rack"),
+                p.value < 0.05) |>
+  arrange(metric)
+
+tidy2 <- do_mod |>
+  group_by(metric,DAT) |>
+  nest() |>
+  mutate(mod = map(data, ~lm(value ~ Rack + NSMS*PPFD, data = .x)),
+         anova = map(data, ~car::Anova(lm(value ~ Rack + NSMS*PPFD,.), type = 3)),
+         tidy = map(anova, broom::tidy),
+         emmeans = map2(mod, data, ~emmeans(.x,~NSMS*PPFD, data = .y)),
+         cld = map2(emmeans, data, ~ cld(.x,
+                                   reversed = T,
+                                   Letters = letters,
+                                   adjust = "none",
+                                   data =  .y)))|>
+  unnest(cols = tidy) |>
+  mutate(p.value = round(p.value,6)) |>
+  dplyr::select(metric,term, p.value) |>
+  dplyr::filter(!term %in% c("(Intercept)","Residuals", "Rack"),
+                p.value < 0.05) |>
+  arrange(metric)
+
+
+make_sick_datatable(tidy1)
+make_sick_datatable(tidy2)
+
+```
+
+
+### EC
+
+#### EC Plots
+```{r}
+
+ec_harvest2 <- ec_ph_temp |>
+  dplyr::filter(Date < lubridate::as_date("2023-12-04")) |>
+  dplyr::select(Date,Rack,NSMS,PPFD,EC)
+
+ec_harvest2_means <- ec_harvest2 |>
+  group_by(NSMS,PPFD,Date) |>
+  summarise(
+    Mean_EC = mean(EC),
+    sd = sd(EC),
+    n = length(EC),
+    se = sd / sqrt(n)
+  )
+
+
+ec_harvest4 <- ec_ph_temp |>
+  dplyr::select(Date,Rack,NSMS,PPFD,EC)
+
+
+ec_harvest4_means <- ec_harvest4 |>
+  group_by(NSMS,PPFD,Date) |>
+  summarise(
+    Mean_EC = mean(EC),
+    sd = sd(EC),
+    n = length(EC),
+    se = sd / sqrt(n)
+  )
+
+
+
+#harvest 2 plot
+  ggplot()+
+  geom_pointrange(data = ec_harvest2_means,
+                  size = 0.4,
+                  aes(y = Mean_EC,
+                      x = Date,
+                      ymin = Mean_EC - se,
+                      ymax = Mean_EC + se,
+                      color = NSMS))+
+  geom_smooth(data = ec_harvest2,
+              linewidth = 0.6,
+              aes(x = Date, y = EC,
+                  color = NSMS),
+              se = F)+
+  facet_wrap(~PPFD, nrow = 3)+
+   scale_fill_npg()+
+   scale_color_npg()+
+   theme_pubr()+
+   theme(axis.title.x = element_text(margin = margin(t = 20),
+                                 size = 14,
+                                face = "bold"),
+    axis.text.x = element_text(margin = margin(t = 10),
+                               angle = 45,
+                               size = 10,
+                               face = "bold"),
+    panel.grid.major = element_blank(),
+        panel.spacing = unit(1.8, "lines"),
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12,
+                                face = "bold",
+                                color = "black"),
+        axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 12,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 0.2)),
+     plot.title = element_text(hjust = 1),
+                               face = "bold")+
+      ylab("EC (dS·cm-1)")
+
+  
+#harvest 4 plot
+ ggplot()+
+  geom_vline(xintercept = lubridate::as_date("2023-12-04"),
+             color = "black", linetype = "dotted",
+             linewidth = 0.8)+
+  geom_pointrange(data = ec_harvest4_means,
+                  size = 0.4,
+                  aes(y = Mean_EC,
+                      x = Date,
+                      ymin = Mean_EC - se,
+                      ymax = Mean_EC + se,
+                      color = NSMS))+
+  geom_smooth(data = ec_harvest4,
+              linewidth = 0.6,
+              aes(x = Date, y = EC,
+                  color = NSMS),
+              se = F)+
+  facet_wrap(~PPFD, nrow = 3)+
+   scale_fill_npg()+
+   scale_color_npg()+
+   theme_pubr()+
+   theme(axis.title.x = element_text(margin = margin(t = 20),
+                                 size = 14,
+                                face = "bold"),
+    axis.text.x = element_text(margin = margin(t = 10),
+                               angle = 45,
+                               size = 10,
+                               face = "bold"),
+    panel.grid.major = element_blank(),
+        panel.spacing = unit(1.8, "lines"),
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12,
+                                face = "bold",
+                                color = "black"),
+        axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 12,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 0.2)),
+     plot.title = element_text(hjust = 1),
+                               face = "bold")+
+      ylab("EC (dS·cm-1)")
+
+
+```
+#### EC Model
+```{r}
+
+
+```
+
+### pH
+```{r}
+
+ph_harvest2 <- ec_ph_temp |>
+  dplyr::filter(Date < lubridate::as_date("2023-12-04")) |>
+  dplyr::select(Date,Rack,NSMS,PPFD,pH)
+
+ph_harvest2_means <- ph_harvest2 |>
+  group_by(NSMS,PPFD,Date) |>
+  summarise(
+    Mean_pH = mean(pH),
+    sd = sd(pH),
+    n = length(pH),
+    se = sd / sqrt(n)
+  )
+
+
+ph_harvest4 <- ec_ph_temp |>
+  dplyr::select(Date,Rack,NSMS,PPFD,pH)
+
+
+ph_harvest4_means <- ph_harvest4 |>
+  group_by(NSMS,PPFD,Date) |>
+  summarise(
+    Mean_pH = mean(pH),
+    sd = sd(pH),
+    n = length(pH),
+    se = sd / sqrt(n)
+  )
+
+
+```
+
+
+#### pH Plots
+```{r}
+
+
+ ggplot()+
+  geom_pointrange(data = ph_harvest2_means,
+                  size = 0.4,
+                  aes(y = Mean_pH,
+                      x = Date,
+                      ymin = Mean_pH - se,
+                      ymax = Mean_pH + se,
+                      color = NSMS))+
+  geom_smooth(data = ph_harvest2,
+              linewidth = 0.6,
+              aes(x = Date, y = pH,
+                  color = NSMS),
+              se = F)+
+  facet_wrap(~PPFD, nrow = 3)+
+   scale_fill_npg()+
+   scale_color_npg()+
+   theme_pubr()+
+   theme(axis.title.x = element_text(margin = margin(t = 20),
+                                 size = 14,
+                                face = "bold"),
+    axis.text.x = element_text(margin = margin(t = 10),
+                               angle = 45,
+                               size = 10,
+                               face = "bold"),
+    panel.grid.major = element_blank(),
+        panel.spacing = unit(1.8, "lines"),
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12,
+                                face = "bold",
+                                color = "black"),
+        axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 12,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 0.2)),
+     plot.title = element_text(hjust = 1),
+                               face = "bold")+
+      ylab("pH")
+
+  
+#harvest 4 plot
+ ggplot()+
+  geom_vline(xintercept = lubridate::as_date("2023-12-04"),
+             color = "black", linetype = "dotted",
+             linewidth = 0.8)+
+  geom_pointrange(data = ph_harvest4_means,
+                  size = 0.4,
+                  aes(y = Mean_pH,
+                      shape = NSMS,
+                      x = Date,
+                      ymin = Mean_pH - se,
+                      ymax = Mean_pH + se,
+                      color = NSMS))+
+  geom_smooth(data = ph_harvest4,
+              linewidth = 0.6,
+              aes(x = Date, y = pH,
+                  color = NSMS),
+              se = F)+
+  facet_wrap(~PPFD, nrow = 3)+
+   scale_fill_npg()+
+   scale_color_npg()+
+   theme_pubr()+
+   theme(axis.title.x = element_text(margin = margin(t = 20),
+                                 size = 14,
+                                face = "bold"),
+    axis.text.x = element_text(margin = margin(t = 10),
+                               angle = 45,
+                               size = 10,
+                               face = "bold"),
+    panel.grid.major = element_blank(),
+        panel.spacing = unit(1.8, "lines"),
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12,
+                                face = "bold",
+                                color = "black"),
+        axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 12,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(
+      colour = guide_legend(
+      override.aes = list(size = 0.6)),
+      plot.title = element_text(hjust = 1),
+                               face = "bold",
+      fill = guide_legend(override.aes = list(linetype = 0)),
+      color = guide_legend(override.aes = list(linetype = 0)))+
+      ylab("pH")
+   
+
+```
+
+### Temp
+```{r}
+
+temp_harvest2 <- ec_ph_temp |>
+  dplyr::filter(Date < lubridate::as_date("2023-12-04")) |>
+  dplyr::select(Date,Rack,NSMS,PPFD,Temp)
+
+temp_harvest2_means <- temp_harvest2 |>
+  group_by(NSMS,PPFD,Date) |>
+  summarise(
+    Mean_Temp = mean(Temp),
+    sd = sd(Temp),
+    n = length(Temp),
+    se = sd / sqrt(n)
+  )
+
+
+temp_harvest4 <- ec_ph_temp |>
+  dplyr::select(Date,Rack,NSMS,PPFD,Temp)
+
+
+temp_harvest4_means <- temp_harvest4 |>
+  group_by(NSMS,PPFD,Date) |>
+  summarise(
+    Mean_Temp = mean(Temp),
+    sd = sd(Temp),
+    n = length(Temp),
+    se = sd / sqrt(n)
+  )
+
+```
+#### Temp Plots
+```{r}
+
+ggplot()+
+  geom_pointrange(data = temp_harvest2_means,
+                  size = 0.4,
+                  aes(y = Mean_Temp,
+                      x = Date,
+                      ymin = Mean_Temp - se,
+                      ymax = Mean_Temp + se,
+                      color = NSMS))+
+  geom_smooth(data = temp_harvest2,
+              linewidth = 0.6,
+              aes(x = Date, y = Temp,
+                  color = NSMS),
+              se = F)+
+  facet_wrap(~PPFD, nrow = 3)+
+   scale_fill_npg()+
+   scale_color_npg()+
+   theme_pubr()+
+   theme(axis.title.x = element_text(margin = margin(t = 20),
+                                 size = 14,
+                                face = "bold"),
+    axis.text.x = element_text(margin = margin(t = 10),
+                               angle = 45,
+                               size = 10,
+                               face = "bold"),
+    panel.grid.major = element_blank(),
+        panel.spacing = unit(1.8, "lines"),
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12,
+                                face = "bold",
+                                color = "black"),
+        axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 12,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 0.2)),
+     plot.title = element_text(hjust = 1),
+                               face = "bold")+
+      ylab("Temp")
+
+  
+#harvest 4 plot
+ ggplot()+
+  geom_vline(xintercept = lubridate::as_date("2023-12-04"),
+             color = "black", linetype = "dotted",
+             linewidth = 0.8)+
+  geom_pointrange(data = temp_harvest4_means,
+                  size = 0.4,
+                  aes(y = Mean_Temp,
+                      shape = NSMS,
+                      x = Date,
+                      ymin = Mean_Temp - se,
+                      ymax = Mean_Temp + se,
+                      color = NSMS))+
+  geom_smooth(data = temp_harvest4,
+              linewidth = 0.6,
+              aes(x = Date, y = Temp,
+                  color = NSMS),
+              se = F)+
+  facet_wrap(~PPFD, nrow = 3)+
+   scale_fill_npg()+
+   scale_color_npg()+
+   theme_pubr()+
+   theme(axis.title.x = element_text(margin = margin(t = 20),
+                                 size = 14,
+                                face = "bold"),
+    axis.text.x = element_text(margin = margin(t = 10),
+                               angle = 45,
+                               size = 10,
+                               face = "bold"),
+    panel.grid.major = element_blank(),
+        panel.spacing = unit(1.8, "lines"),
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12,
+                                face = "bold",
+                                color = "black"),
+        axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 12,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(
+      colour = guide_legend(
+      override.aes = list(size = 0.6)),
+      plot.title = element_text(hjust = 1))+
+      ylab("Temp")
+   
+
+
+```
+
+
+### Levels
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# levels_raw <- googlesheets4::read_sheet(
+#     "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+#               sheet = "NS Level",
+#               col_types = c("c")) %>%
+#     mutate_at(vars(9:12,Tray), as.numeric) %>%
+#     mutate(
+#       Date = lubridate::as_date(Date),
+#             Timepoint = as.numeric(Timepoint))
+# 
+# levels_1 <- levels_raw %>%
+#   dplyr::filter(NSMS == "1") %>%
+#   dplyr::select(Tub_ID, NSMS, Refill_NSMS1) %>%
+#   drop_na(Refill_NSMS1) %>%
+#   mutate_at(vars(Refill_NSMS1), as.numeric) %>%
+#   group_by(Tub_ID) %>%
+#   summarise(
+#     L_H2O = sum(Refill_NSMS1)
+#   )
+# 
+# levels_rest <- levels_raw %>%
+#   dplyr::filter(!NSMS == "1") %>%
+#   full_join(trial_key) %>%
+#   drop_na(Corrected_Volume_Loss) %>%
+#   group_by(Tub_ID) %>%
+#   summarise(
+#     L_H2O = sum(Corrected_Volume_Loss)) %>%
+#   ungroup()
+# 
+# levels <- levels_1 %>%
+#   full_join(levels_rest)%>%
+#   full_join(trial_key%>%
+#               dplyr::select(Tub_ID,PPFD,Code, NSMS))%>%
+#   dplyr::filter(!Tub_ID %in% c("36","51"))
+# 
+# 
+# level_maths <- levels %>%
+#   filter(!Code == "CTRL")
+#   mutate(
+#     high_low = ifelse(
+#       Code %in% c("CTRL"), "high", "low")) %>%
+#   group_by(high_low,PPFD)%>%
+#   summarise(mean = mean(L_H2O))
+# 
+# 
+# 11.5+13.8+14.8
+# 40.1/3
+# ev = 13.4
+# 
+# 72.9+73.6+73.2
+# 219.7/3
+# sv = 73.2
+# 
+# pd = (sv-ev)/sv *100
+# pd
+# 
+# summary%>%
+#   ggplot(aes(x = Code, y = mean,
+#              color = Code, fill = Code,
+#              shape = PPFD))+
+#   geom_point()
+
+### Models
+
+# levelsm <- levels %>%
+#   mutate_at(vars(PPFD,Code), as.factor)
+#   dplyr::filter(!Code == "CTRL")
+# 
+# 
+# attach(levelsm)
+# 
+# mod <- lm(L_H2O ~ PPFD+Code)
+# 
+# summary(mod)
+# anova(mod)
+# 
+# 
+# anova <- aov(L_H2O ~ PPFD+Code)
+# tukey <- TukeyHSD(anova)
+# cld<- multcompView::multcompLetters4(anova,tukey)
+# 
+# 
+# levels_tk <- levelsm %>%
+#     group_by(PPFD)%>%
+#     summarise(mean = mean(L_H2O),
+#               quant = quantile(L_H2O, probs = 0.75),
+#               sd = sd(L_H2O),
+#               n = length(L_H2O),
+#               se = sd / sqrt(n)) %>%
+#     arrange(desc(mean)) %>%
+#     mutate(emmean = mean)
+# 
+# # extracting the compact letter display and adding to the Tk table
+# cld <- as.data.frame.list(cld$PPFD)
+# levels_tk['cld'] = cld$Letters
+# 
+# 
+# #Plot mean
+# levels_tk %>%
+# ggplot(aes(x = PPFD, y = emmean, fill = PPFD,
+#            color = PPFD)) +
+#   geom_bar(stat = "identity", alpha = 0.8) +
+#   #facet_grid(~PPFD)+ 
+#   geom_text(
+#     data = levels_tk,
+#     aes(label = cld, y = mean),
+#     color = "black",
+#     vjust = -2.5,
+#     hjust = 0.5,
+#     size = 6)+
+#   geom_errorbar(
+#     data = levels_tk,
+#     aes(ymin = emmean - se,
+#         ymax = emmean + se),
+#     width = 0.1, color = "black",
+#     linewidth = 0.6) +
+#    scale_color_npg()+
+#   scale_fill_npg()+
+#   #theme_bw()+
+#   theme(panel.grid.major = element_blank(),
+#         panel.background = element_rect(fill = 'lightgrey'),
+#         panel.spacing = unit(1.5, "lines"),
+#         strip.background = element_rect(fill = "black"),
+#         strip.text = element_text(size = 14,
+#                                 face = "bold",
+#                                 color = "white"),
+#         axis.title.x = element_text(
+#          size = 20,
+#          face = "bold",
+#          margin = margin(t = 15)),
+#         axis.text.x = element_text(
+#          margin = margin(t = 8),
+#          angle = 45,
+#          size = 16,
+#          face = "bold"),
+#         axis.title.y = element_text(
+#          size = 16,
+#          face = "bold",
+#          margin = margin(r = 25)),
+#         axis.text.y = element_text(
+#          margin = margin(t = 5),
+#          size = 10,
+#          face = "bold"),
+#       legend.title = element_text(size = 14,
+#                                   face = "bold"),
+#       legend.text = element_text(size = 12),
+#       legend.position = "none")+
+#      guides(colour = guide_legend(
+#      override.aes = list(size = 1.0)))+
+#   ylab("Mean Water Added (L) / Tub")+
+#   xlab("PPFD")+
+#   scale_y_continuous(breaks = scales::breaks_pretty(5),
+#                      limits = c(0,35))
+# 
+
+```
+
+## Ferts
+
+### Fert 124
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+
+ns_levels <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "NS Level",
+              col_types = c("c")) %>%
+    mutate_at(vars(9:12, Tray), as.numeric) %>%
+    mutate(
+      Date = lubridate::as_date(Date))
+
+
+
+solution_gL <- googlesheets4::read_sheet(
+    "1bw0GWZI7nA_Xz6rozvD2Z-78atfNM4d-BqGzRtKJh5Q",
+              sheet = "g_L",
+              col_types = c("c"))|>
+  mutate_at(vars(Solution_gL),as.numeric)|>
+  dplyr::filter(Trial == "7",
+                !Fertilizer %in% c("MB141838",
+                                   "Jack15520",
+                                   "Jack15515",
+                                   "MgNO3",
+                                   "NH4NO3",
+                                   "KSO4"
+                                   ))|>
+  dplyr::select(Trial,NSMS,Fertilizer,Solution_gL)
+
+
+fert_1_raw <- ns_levels |>
+  dplyr::filter(NSMS == "1",
+                Tag == "Start",
+                !Timepoint == "1") |>
+  dplyr::select(Timepoint,Tub_ID, NSMS, NS_Volume) |>
+  mutate_at(vars(NS_Volume), as.numeric) |>
+  mutate(Refill_Amount = NS_Volume, .keep = "unused")
+
+
+fert_1 <- solution_gL |>
+  dplyr::filter(NSMS == "1") |>
+  dplyr::select(Fertilizer,Solution_gL) |>
+  cross_join(fert_1_raw) |>
+  mutate(Grams_Added = Refill_Amount*Solution_gL)|>
+  dplyr::filter(Grams_Added >= 0)
+
+fert_1_harvest2 <- fert_1 |>
+  dplyr::filter(Timepoint == "2")|>
+  dplyr::select(Tub_ID,NSMS,Refill_Amount,Fertilizer,Grams_Added)
+
+
+fert_1_harvest4 <- fert_1 |>
+  group_by(Tub_ID,NSMS,Fertilizer) |>
+  summarise(Grams_Added = sum(Grams_Added),
+            Refill_Amount = sum(Refill_Amount))
+
+
+fert_24_raw <- ns_levels %>%
+  dplyr::filter(NSMS %in% c("2","4"),
+                Tag == "End",
+                !Timepoint == "4") |>
+  dplyr::select(Tub_ID,NSMS,Timepoint,Volume_Loss) |>
+  mutate(Refill_Amount = Volume_Loss, .keep = "unused")
+
+
+fert_24 <- solution_gL |>
+  dplyr::filter(NSMS %in% c("2","4")) |>
+  full_join(fert_24_raw, relationship = "many-to-many") |>
+  mutate(Grams_Added = Refill_Amount*Solution_gL)|>
+  dplyr::filter(Grams_Added >= 0)
+
+fert_24_harvest2 <- fert_24 |>
+  dplyr::filter(Timepoint == "2") |>
+  dplyr::select(Tub_ID,NSMS,Refill_Amount,Fertilizer,Grams_Added)
+
+fert_24_harvest4 <- fert_24 |>
+  group_by(Tub_ID,NSMS,Fertilizer) |>
+  summarise(
+    Grams_Added = sum(Grams_Added),
+    Refill_Amount = sum(Refill_Amount)
+  ) |>
+  ungroup()
+
+
+```
+
+### Fert 3
+```{r}
+
+
+fert_3_raw <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Fert 3",
+              col_types = c("c"))%>%
+  mutate_at(vars(Tray,AB_Added), as.numeric) %>%
+  full_join(trial_key) %>%
+  dplyr::filter(NSMS == "3") |>
+  mutate(AB_Added_L = AB_Added/1000)
+
+levels_3 <- ns_levels |>
+  dplyr::filter(NSMS == "3",
+                Tag == "End",
+                !Timepoint == "4") |>
+  dplyr::select(Timepoint,Tub_ID, NSMS, Volume_Loss) |>
+  mutate_at(vars(Volume_Loss), as.numeric) |>
+  mutate(Refill_Amount = Volume_Loss, .keep = "unused")
+
+
+
+fert_stock <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Fert Stock",
+              col_types = c("c"))%>%
+  mutate_at(vars(Stock_gL), as.numeric)|>
+  dplyr::select(Fertilizer,Stock_gL)
+
+
+fert_3 <- fert_3_raw |>
+  cross_join(fert_stock) |>
+  mutate(Grams_Added = AB_Added_L*Stock_gL,
+         Timepoint = as.numeric(Timepoint),
+         .keep = "unused")
+
+fert_3_harvest2 <- fert_3 |>
+  dplyr::filter(Timepoint == "1")|>
+  dplyr::select(Tub_ID,NSMS,Fertilizer,Grams_Added)|>
+  full_join(levels_3 |> dplyr::filter(Timepoint == "1"))|>
+  dplyr::select(-Timepoint)
+
+
+fert_3_harvest4 <- fert_3 |>
+  dplyr::select(Tub_ID,NSMS,Timepoint,Fertilizer,Grams_Added) |>
+  full_join(levels_3, relationship = "many-to-many")|>
+  group_by(Tub_ID,Fertilizer,NSMS) |>
+  summarise(
+    Grams_Added = sum(Grams_Added),
+    Refill_Amount = sum(Refill_Amount)
+  ) |>
+  ungroup()
+
+```
+
+### Fert 56
+
+#### Create 56 dataframe
+```{r}
+
+
+# ns_levels <- googlesheets4::read_sheet(
+#     "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+#               sheet = "NS Level",
+#               col_types = c("c")) %>%
+#     mutate_at(vars(9:12,Tray), as.numeric) %>%
+#     mutate(
+#       Date = lubridate::as_date(Date),
+#             Timepoint = as.numeric(Timepoint))
+# 
+# 
+# t6_refill <- calc_nsms6(ns_levels, trial_key,
+#                         Trial = 7,
+#                         Timepoint = 3,
+#                        Harvest_Days = 7,
+#                        Refill_Days = 4)|>
+#   mutate(Treatment = "6")
+# 
+# 
+# 
+# harvest <- googlesheets4::read_sheet(
+#     "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+#               sheet = "Harvest",
+#               col_types = c("c")) %>%
+#   mutate_at(vars(4:9), as.numeric) %>%
+#   mutate_at(vars(Date), lubridate::as_date)
+# 
+# 
+# t5_refill <- calc_nsms5(ns_levels, trial_key,
+#                         harvest,Timepoint = 3,
+#                         Harvest_Days = 7,
+#                        Refill_Days = 4) |>
+#   mutate(Treatment = "5")
+#  
+#  
+# #create dataframes for each timepoint
+# combined3 <- t5_refill |>
+#   full_join(t6_refill) |>
+#   mutate(
+#     timepoint = 3
+#   )
+# 
+# combined1 |> full_join(combined2) |> full_join(combined3) |>
+#   make_sick_datatable()
+
+```
+
+#### Fert 56 import
+```{r}
+
+
+fert_56_raw <- googlesheets4::read_sheet(
+    "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+              sheet = "Fert 56",
+              col_types = c("c")) |>
+  mutate_at(vars(Grams_Added, WUE, Refill_L), as.numeric)
+
+
+fert_56_w <- fert_56_raw |>
+  mutate(NSMS = Treatment,
+         Timepoint = as.numeric(timepoint),
+         Solution_gL = round(Grams_Added/Refill_L,10),
+         .keep = "unused") |>
+  dplyr::select(Timepoint,Fertilizer,PPFD,NSMS,Solution_gL) |>
+  dplyr::filter(Solution_gL >= 0,
+                !Fertilizer == "NH4Mo")
+  
+  
+
+ns_levels_56 <- ns_levels %>%
+  dplyr::filter(NSMS %in% c("5","6"),
+                Tag == "End",
+                !Timepoint == "4") |>
+  dplyr::select(Tub_ID,NSMS,Timepoint,Volume_Loss) |>
+  mutate(Refill_Amount = Volume_Loss, .keep = "unused") |>
+  full_join(trial_key |> dplyr::select(Tub_ID,PPFD))
+
+
+fert_56 <- ns_levels_56 |>
+  full_join(fert_56_w, relationship = "many-to-many") |>
+  mutate(Grams_Added = round(Refill_Amount*Solution_gL,10)) |>
+  dplyr::filter(Grams_Added >= 0)
+
+
+fert_56_harvest4 <- fert_56 |>
+  group_by(Tub_ID,NSMS,Fertilizer) |>
+  summarise(
+    Grams_Added = sum(Grams_Added))
+
+
+fert_56_harvest2 <- fert_56 |>
+  filter(Timepoint == "1") |>
+  dplyr::select(Tub_ID,NSMS,Refill_Amount,Fertilizer,Grams_Added)
+
+```
+
+### Ferts Combined
+```{r}
+
+fert_harvest2 <- fert_1_harvest2 |>
+  full_join(fert_24_harvest2) |>
+  full_join(fert_3_harvest2) |>
+  full_join(fert_56_harvest2) |>
+  full_join(trial_key |> dplyr::select(Tub_ID,PPFD,Code,Rack))|>
+  dplyr::filter(!Fertilizer == "NH4Mo") |>
+  mutate(
+   Micro_Macro = ifelse(
+     Fertilizer %in% c("CaNO3",
+                       "FeEDDHA",
+                       "MgSO4",
+                       "MAP",
+                       "MKP",
+                       "KNO3"),"Macroelements","Microelements"))
+
+
+fert_harvest2_means <- fert_harvest2 |>
+  group_by(PPFD,Code,Fertilizer,Micro_Macro) |>
+  summarise(
+    Mean_Grams_Added = mean(Grams_Added),
+    sd = sd(Grams_Added),
+    n = length(Grams_Added),
+    se = sd / sqrt(n)
+  )
+
+
+fert_harvest2 |>
+  filter(Micro_Macro == "Macro",
+         Fertilizer == "MgSO4") |>
+  ggplot(aes(x = Code, y = Grams_Added, fill = PPFD))+
+  geom_bar(stat = "identity",
+           position = position_dodge(),
+           width = 0.5) +
+  facet_wrap(~Fertilizer, scales = "free") +
+  theme_pubr()
+
+
+```
+
+### Micro Macro Models
+```{r}
+
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+
+
+micros <- fert_harvest2 |> dplyr::filter(Micro_Macro == "Microelements")|>
+  mutate_at(vars(Rack,Code,PPFD), as.factor)
+
+
+macros <- fert_harvest2 |> dplyr::filter(Micro_Macro == "Macroelements")|>
+  mutate_at(vars(Rack,Code,PPFD), as.factor)
+
+
+mic_mod <- lm(Grams_Added ~ Rack + Code*PPFD,
+              data = micros)
+
+
+mac_mod <- lm(Grams_Added ~ Rack + Code*PPFD,
+              data = macros)
+  
+  
+car::Anova(mic_mod, type = "3")
+car::Anova(mac_mod, type = "3")
+
+
+mic_resid <- broom::augment(mic_mod) |>
+  mutate(
+    .stud_resid = rstudent(mic_mod))
+
+
+mac_resid <- broom::augment(mac_mod) |>
+  mutate(
+    .stud_resid = rstudent(mac_mod))
+
+
+
+ggplot(mic_resid, aes(x=.fitted, y=.stud_resid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+
+ggplot(mac_resid, aes(x=.fitted, y=.stud_resid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+mic_resid |>
+  ggplot(aes(x = .stud_resid))+
+  geom_density(fill = "purple",
+               alpha = 0.2)+
+  scale_x_continuous(
+    breaks = c(-3,0,3),
+    limits = c(-3,3)
+  )+
+  theme_minimal()
+
+mac_resid |>
+  ggplot(aes(x = .stud_resid))+
+  geom_density(fill = "purple",
+               alpha = 0.2)+
+  scale_x_continuous(
+    breaks = c(-3,0,3),
+    limits = c(-3,3)
+  )+
+  theme_minimal()
+
+
+mic_resid |>
+  ggplot(aes(sample = .stud_resid))+
+  stat_qq()+
+  stat_qq_line()
+
+mac_resid |>
+  ggplot(aes(sample = .stud_resid))+
+  stat_qq()+
+  stat_qq_line()
+
+
+```
+
+### Micro Macro Plots
+```{r}
+
+
+fert_harvest2_macromicro <- fert_harvest2 |>
+  group_by(Code,PPFD,Micro_Macro) |>
+  summarise(
+    Mean_Grams_Added = mean(Grams_Added),
+    sd = sd(Grams_Added),
+    n = length(Grams_Added),
+    se = sd / sqrt(n)
+  )
+
+
+fert_harvest2_macromicro |>
+  ggplot(aes(x = Code, y = Mean_Grams_Added, fill = PPFD,
+             shape = PPFD, color = PPFD))+
+  geom_bar(stat = "identity",
+           position = position_dodge(width = 0.7),
+           width = 0.7) +
+  geom_errorbar(
+    color = "black",
+    width = 0.4,
+    position = position_dodge(width = 0.7),
+    aes(ymin = Mean_Grams_Added - se,
+        ymax = Mean_Grams_Added + se))+
+  facet_wrap(~Micro_Macro, scales = "free") +
+  theme_pubr()+
+  theme(axis.title.x = element_text(margin = margin(t = 20),
+                                 size = 14,
+                                face = "bold"),
+    axis.text.x = element_text(margin = margin(t = 10),
+                               angle = 45,
+                               size = 10,
+                               face = "bold"),
+    panel.grid.major = element_blank(),
+        panel.spacing = unit(1.8, "lines"),
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12,
+                                face = "bold",
+                                color = "black"),
+        axis.title.y = element_text(
+        size = 14,
+        face = "bold",
+        margin = margin(r = 25)),
+        axis.text.y = element_text(
+        margin = margin(t = 5),
+        size = 10,
+        face = "bold"),
+      legend.title = element_text(size = 12,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "right")+
+     guides(colour = guide_legend(
+     override.aes = list(size = 0.2)),
+     plot.title = element_text(hjust = 1),
+                               face = "bold")+
+  ylab("Fertilizer added (g)")+
+  xlab("Nutrient solution mangement strategy")+
+  scale_fill_npg()
+
+
+
+```
+
+
+
+```{r}
+###### Single Fertilizer Plots ####
+
+all_combined %>%
+  #filter(Micro_Macro == "Macro") %>%
+  ggplot(aes(x = Code, y = grams_Added, color = Code, fill = Code))+
+  geom_bar(stat = "identity")+
+  facet_grid(~Fertilizer, scales = "free",
+             labeller = label_wrap_gen(width = 10,multi_line = TRUE))
+
+
+
+
+normalized_means <- all_combined %>%
+  group_by(Fertilizer) %>%
+  mutate(
+    max = max(grams_Added),
+    min = min(grams_Added),
+    normalized_GA = (grams_Added-min)/(max-min)
+  ) %>%
+  group_by(Code,Fertilizer,Micro_Macro) %>%
+  summarise(
+        mean = mean(normalized_GA),
+    sd = sd(normalized_GA),
+    n = length(normalized_GA),
+    se = sd / sqrt(n))%>%
+  filter(Micro_Macro == "Macro")
+
+
+
+
+normalized_means%>%
+  filter(!Fertilizer %in% c(
+                           "Magnesium sulfate heptahydrate",
+                           "Monopotassium phosphate (MKP)")) %>%
+  ggplot(aes(x = Code, y = mean, fill = Code, color = Code))+
+  geom_bar(stat = "identity", alpha = 0.8)+
+  facet_grid(~Fertilizer, scales = "free",
+             labeller = label_wrap_gen(width = 10,multi_line = TRUE))+
+  geom_errorbar(aes(ymin = mean - se,
+                    ymax = mean + se),
+                width = 0.2, color = "black",
+                linewidth = 1) +
+  scale_color_npg()+
+  scale_fill_npg()+
+  #theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'lightgrey'),
+        panel.spacing = unit(1.5, "lines"),
+        strip.background = element_rect(fill = "black"),
+        strip.text = element_text(size = 14,
+                                face = "bold",
+                                color = "white"),
+        axis.title.x = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(t = 25)),
+        axis.title.y = element_text(
+         size = 16,
+         face = "bold",
+         margin = margin(r = 25)),
+        axis.text.y = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold"),
+        axis.text.x = element_text(
+         margin = margin(t = 5),
+         size = 10,
+         face = "bold",
+         angle = 45),
+        legend.title = element_text(size = 14,
+                                  face = "bold"),
+      legend.text = element_text(size = 12),
+      legend.position = "none")+
+     guides(colour = guide_legend(
+       nrow = 1,
+     override.aes = list(size = 1.0)))+
+  ylab("Normalized fertilizer added")+
+  xlab("NSMS")+
+  scale_y_continuous(breaks = scales::breaks_pretty(5))
+
+
+
+```
+
+
+
+### Water use efficiency
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# levels <- levels_raw %>%
+#   full_join(trial_key) %>%
+#   mutate_at(vars(Timepoint, Corrected_Volume_Loss), as.numeric) %>%
+#   drop_na(Corrected_Volume_Loss) %>%
+#   group_by(Tub_ID) %>%
+#   reframe(CumSum_Loss = cumsum(Corrected_Volume_Loss),
+#           Timepoint = Timepoint) %>%
+#   ungroup()
+# 
+# harvest <- trial_key %>%
+#   full_join(harvest_raw, multiple = "all") %>%
+#   mutate_at(vars(Timepoint), as.numeric) %>%
+#   group_by(Tub_ID, Timepoint) %>%
+#   reframe(CumDry_Harvest = cumsum(`Dry Canopy (g)`)) %>%
+#   ungroup()
+# 
+# dates <- harvest_raw %>%
+#   select(Date,Timepoint, Tub_ID) %>%
+#   mutate(Timepoint = as.numeric(Timepoint))
+# 
+# 
+# step2 <- levels %>%
+#   full_join(harvest) %>%
+#   mutate(WUE = CumDry_Harvest/CumSum_Loss) %>%
+#   full_join(trial_key)
+# 
+# level_harvest <- dates %>%
+#   full_join(step2, multiple = "all") %>%
+#   mutate(DAT = Date - TransplantDate)
+# 
+# 
+# lh_means <- level_harvest %>%
+#   group_by(PPFD,DAT) %>%
+#   summarise(
+#     mean = mean(WUE),
+#     sd = sd(WUE),
+#     n = length(WUE),
+#     se = sd / sqrt(n),
+#     WUE = mean
+#   )
+# 
+# 
+# 
+# 
+# lh_means %>%
+#   ggplot(aes(x = DAT, y = WUE, fill = PPFD,
+#              color= PPFD))+
+#     # stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75,
+#     #           alpha = 0.8, se = F)+
+#   geom_line(linewidth = 0.8, alpha = 0.5)+
+#   geom_point(size = 2.8)+
+#   geom_errorbar(
+#     width= 0.05,
+#     aes(ymin = WUE - se,
+#     ymax = WUE + se))+
+#    theme_bw()+
+#   scale_fill_npg()+
+#   scale_color_npg()+
+#   ylim(0,3)+
+#   theme(
+#     axis.title.y = element_text(margin = margin(r = 20)),
+#     axis.title.x = element_text(margin = margin(t = 20)))+
+#   ylab("Dry canopy (g) / Transpiration (L)")
+
+
+
+```
+
+
+
+# CCI & ACI
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+#NS trial data
+# acci_raw <- googlesheets4::read_sheet(
+#     "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+#               sheet = "Pigments",
+#               col_types = c("c")) %>%
+#     mutate_at(vars(7:9, Tray), as.numeric) %>%
+#     mutate_at(vars(Date), lubridate::as_date)
+# 
+# 
+# acci <- acci_raw %>%
+#   full_join(trial_key) %>%
+#   mutate(
+#     DAT = Date - TransplantDate
+#   ) %>%
+#   mutate_at(vars(PPFD,NSMS,DAT),as.factor)
+
+
+```
+
+
+# Nutrient Results
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+#  ns_results <- googlesheets4::read_sheet(
+#     "1bw0GWZI7nA_Xz6rozvD2Z-78atfNM4d-BqGzRtKJh5Q",
+#     sheet = "Solution Results",
+#     col_types = c("c"))%>%
+#     pivot_longer(
+#       -c(1:12),
+#       names_to = "Nutrient",
+#       values_to = "Measured_mgL") %>%
+#     dplyr::filter(!Nutrient == "SO4",
+#                   Trial == "3",
+#                   Timepoint == "5") %>%
+#   mutate(
+#     Measured_mgL = as.numeric(Measured_mgL),
+#     Code = case_when(
+#       NSMS == "1" ~ "CTRL",
+#       NSMS == "2" ~ "FULL",
+#       NSMS == "3" ~ "EC",
+#       NSMS == "4" ~ "HALF",
+#       NSMS == "5" ~ "WUE",
+#       NSMS == "6" ~ "LAB"),
+#     Code = fct_relevel(Code, "CTRL",'FULL','HALF',
+#                        'EC','WUE','LAB')
+#   )
+# 
+# 
+# ns_PPFD_means <- ns_results %>%
+#   group_by(PPFD,Nutrient) %>%
+#   summarise(
+#     mean = mean(Measured_mgL),
+#     sd = sd(Measured_mgL),
+#     n = length(Measured_mgL),
+#     se = sd / sqrt(n)
+#   )
+
+```
+
+### Plot NS
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# ns_targets <-  googlesheets4::read_sheet(
+#     "1bw0GWZI7nA_Xz6rozvD2Z-78atfNM4d-BqGzRtKJh5Q",
+#     sheet = "Solution Targets",
+#     col_types = c("c"))
+# 
+# 
+# combined_nutes <- ns_results %>%
+#     full_join(ns_targets) %>%
+#     mutate_at(vars(Measured_mgL, Target_mgL), as.numeric) %>%
+#     filter(Trial == "3",
+#            !NSMS == "0",
+#            Timepoint == "5") %>%
+#     group_by(PPFD,Code,Nutrient) %>%
+#     reframe(
+#       mean = mean(Measured_mgL),
+#       target = mean(Target_mgL),
+#       sd = sd(Measured_mgL),
+#       n = length(Measured_mgL),
+#       se = sd / sqrt(n)
+#     )
+#   
+#   
+# macro_nutes <- combined_nutes %>%
+#   filter(Nutrient %in% c('NH4-N','NO3-N','P','K'))
+# 
+# micro_nutes <- combined_nutes %>%
+#   filter(!Nutrient %in% c('NH4-N','NO3-N','P','K'))
+# 
+# plot <- macro_nutes %>%
+#   ggplot(aes(x = Code, y = mean,
+#               fill = PPFD)) +
+#   geom_hline(data = macro_nutes, aes(yintercept = target),
+#               color = "green", linetype = "solid", linewidth = 10, alpha = 0.2) +
+#   geom_hline(data = macro_nutes, aes(yintercept = target),
+#               color = "black", linetype = "dotted", linewidth = 0.5, alpha = 0.8
+#              ) +
+#   geom_errorbar(aes(ymin = mean - se,
+#                     ymax = mean + se),
+#                 width = 0.2,  position = position_dodge(0.5),
+#                 color = 'black') +
+#  ylab("Nutrient ppm")+
+#  theme_bw()+
+#  scale_fill_npg()+
+#   theme(
+#     axis.title.x = element_text(margin = margin(t = 20),
+#                                  size = 16,
+#                                 face = "bold"),
+#     axis.text.x = element_text(margin = margin(t = 10),
+#                                angle = 45,
+#                                size = 10,
+#                                face = "bold"),
+#     panel.grid.major = element_blank(),
+#         panel.spacing = unit(1.8, "lines"),
+#         strip.background = element_rect(fill = "black"),
+#         strip.text = element_text(size = 14,
+#                                 face = "bold",
+#                                 color = "white"),
+#         axis.title.y = element_text(
+#         size = 16,
+#         face = "bold",
+#         margin = margin(r = 25)),
+#         axis.text.y = element_text(
+#         margin = margin(t = 5),
+#         size = 10,
+#         face = "bold"),
+#       legend.title = element_text(size = 14,
+#                                   face = "bold"),
+#       legend.text = element_text(size = 12),
+#       legend.position = "right")+
+#      guides(colour = guide_legend(
+#      override.aes = list(size = 1.0)))+
+#   ylab("Nutrient Solution Concentration (PPM)")+
+#   xlab("NSMS")+
+#   geom_bar(stat = "identity", position = position_dodge(0.5),
+#            width = 0.5, alpha = 0.8)+
+#   facet_wrap(~Nutrient, scales = "free")
+# 
+# plotly::ggplotly(plot)
+#   
+
+```
+
+### NS Mods
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+```
+
+### Plot TS
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+ # ts_results <- googlesheets4::read_sheet(
+ #    "1bw0GWZI7nA_Xz6rozvD2Z-78atfNM4d-BqGzRtKJh5Q",
+ #    sheet = "Tissue Results",
+ #    col_types = c("c")) %>%
+ #    dplyr::select(c(1:21), -11) %>%
+ #    pivot_longer(
+ #      -c(1:9),
+ #      names_to = "Nutrient",
+ #      values_to = "Measured") %>%
+ #  full_join(trial_key) %>%
+ #  dplyr::filter(Trial == "3")%>%
+ #  mutate(
+ #    Code = case_when(
+ #      NSMS == "1" ~ "CTRL",
+ #      NSMS == "2" ~ "FULL",
+ #      NSMS == "3" ~ "EC",
+ #      NSMS == "4" ~ "HALF",
+ #      NSMS == "5" ~ "WUE",
+ #      NSMS == "6" ~ "LAB"),
+ #    Code = fct_relevel(Code, "CTRL",'FULL','HALF',
+ #                       'EC','WUE','LAB')
+ #  )
+
+
+  #load nutrient solution targets
+# ts_targets <-  googlesheets4::read_sheet(
+#     "1bw0GWZI7nA_Xz6rozvD2Z-78atfNM4d-BqGzRtKJh5Q",
+#     sheet = "Tissue Targets",
+#     col_types = c("c"))
+# 
+#   
+# combined_nutes <- ts_results %>%
+#     full_join(ts_targets) %>%
+#     mutate_at(vars(Measured, Target), as.numeric) %>%
+#     mutate(
+#      Nutrient = fct_relevel(Nutrient,
+#                            'N','P','K','Ca',
+#                            'Mg','S','B','Zn',
+#                            'Mn','Fe','Cu'),
+#   hort_low = case_when(
+#     Nutrient == "N" ~ 3.75,
+#     Nutrient == "P" ~ 0.45,
+#     Nutrient == "K" ~ 3.00,
+#     Nutrient == "Ca" ~ 1.25,
+#     Nutrient == "Mg" ~ 0.45,
+#     Nutrient == "S" ~ 0.25,
+#     Nutrient == "Fe" ~ 50,
+#     Nutrient == "Mn" ~ 55,
+#     Nutrient == "Zn" ~ 25,
+#     Nutrient == "Cu" ~ 6,
+#     Nutrient == "B" ~ 15,
+#     Nutrient == "Mo" ~ 0.33),
+#   hort_high = case_when(
+#     Nutrient == "N" ~5.6,
+#     Nutrient == "P" ~0.77,
+#     Nutrient == "K" ~6.5,
+#     Nutrient == "Ca" ~2.5,
+#     Nutrient == "Mg" ~0.78,
+#     Nutrient == "S" ~0.35,
+#     Nutrient == "Fe" ~150,
+#     Nutrient == "Mn" ~110,
+#     Nutrient == "Zn" ~60,
+#     Nutrient == "Cu" ~16,
+#     Nutrient == "B" ~45,
+#     Nutrient == "Mo" ~0.58),
+#     ppm = ifelse(
+#     Nutrient %in% c("N",'P','K','Ca','Mg','S'),
+#                        "  (%)","  (ppm)"),
+#     Nutrient = paste0(Nutrient,ppm),
+#        Nutrient = fct_relevel(Nutrient,
+#                            'N  (%)','P  (%)','K  (%)',
+#                            'Ca  (%)','Mg  (%)',
+#                            'S  (%)','B  (ppm)','Zn  (ppm)',
+#                            'Mn  (ppm)','Fe  (ppm)',
+#                            'Cu  (ppm)'),)%>%
+#     filter(Trial == "3",
+#            !NSMS == "0")
+
+
+# nute_means <- combined_nutes %>%
+#   group_by(Nutrient, Code, Target) %>%
+#   summarise(
+#       mean = mean(Measured),
+#       Percent_diff = round((mean(Measured)-mean(Target))/mean(Target)*100,0)
+#     ) %>%
+#   mutate(
+#   Micro_Macro = ifelse(
+#      Nutrient %in% c("N",'P','K','Ca','Mg','S'),
+#                        "Macro","Micro"),
+#   hort_low = case_when(
+#     Nutrient == "N" ~ 3.75,
+#     Nutrient == "P" ~ 0.45,
+#     Nutrient == "K" ~ 3.00,
+#     Nutrient == "Ca" ~ 1.25,
+#     Nutrient == "Mg" ~ 0.45,
+#     Nutrient == "S" ~ 0.25,
+#     Nutrient == "Fe" ~ 50,
+#     Nutrient == "Mn" ~ 55,
+#     Nutrient == "Zn" ~ 25,
+#     Nutrient == "Cu" ~ 6,
+#     Nutrient == "B" ~ 15,
+#     Nutrient == "Mo" ~ 0.33),
+#   hort_high = case_when(
+#     Nutrient == "N" ~5.6,
+#     Nutrient == "P" ~0.77,
+#     Nutrient == "K" ~6.5,
+#     Nutrient == "Ca" ~2.5,
+#     Nutrient == "Mg" ~0.78,
+#     Nutrient == "S" ~0.35,
+#     Nutrient == "Fe" ~150,
+#     Nutrient == "Mn" ~110,
+#     Nutrient == "Zn" ~60,
+#     Nutrient == "Cu" ~16,
+#     Nutrient == "B" ~45,
+#     Nutrient == "Mo" ~0.58))
+# 
+# 
+# nute_means %>%
+#   filter(!Nutrient %in% c("N","P","K")) %>%
+#   ggplot(aes(x = Code, y = mean, color = Code,
+#              fill = Code))+
+#   geom_bar(stat = "identity")+
+#   facet_wrap(~Nutrient, scales = "free") +
+#   geom_hline(aes(yintercept = Target),
+#               color = "black", linetype = "solid",
+#              linewidth = 10, alpha = 0.1) +
+#   geom_hline(aes(yintercept = Target),
+#               color = "black", linetype = "dotted",
+#              linewidth = 1, alpha = 0.8
+#              ) +
+#   geom_hline(aes(yintercept = Target2),
+#               color = "black", linetype = "dotted",
+#              linewidth = 1, alpha = 0
+#              ) +
+#   geom_text(
+#     aes(label = Percent_diff, y = mean),
+#     color = "black",
+#     vjust = -1,
+#     hjust = 0.2,
+#     size = 5)+
+#    scale_color_npg()+
+#   scale_fill_npg()+
+#   #theme_bw()+
+# theme(panel.grid.major = element_blank(),
+#         panel.background = element_rect(fill = 'lightgrey'),
+#         panel.spacing = unit(1.5, "lines"),
+#         strip.background = element_rect(fill = "black"),
+#         strip.text = element_text(size = 14,
+#                                 face = "bold",
+#                                 color = "white"),
+#         axis.title.x = element_blank(),
+#         axis.title.y = element_text(
+#          size = 16,
+#          face = "bold",
+#          margin = margin(r = 25)),
+#         axis.text.y = element_text(
+#          margin = margin(t = 5),
+#          size = 10,
+#          face = "bold"),
+#         axis.text.x = element_text(
+#          margin = margin(t = 5),
+#          size = 10,
+#          face = "bold",
+#          angle = 45),
+#         legend.title = element_text(size = 14,
+#                                   face = "bold"),
+#       legend.text = element_text(size = 12),
+#       legend.position = "none")+
+#      guides(colour = guide_legend(
+#        nrow = 1,
+#      override.aes = list(size = 1.0)))+
+#   ylab("Leaf % Sulfur")
+# 
+# 
+# 
+# combined_nutes %>%
+#   mutate(Target2 = Target+(Target/3))%>%
+#   filter(!Nutrient %in% c("N  (%)","P  (%)","K  (%)")) %>%
+#   ggplot(aes(x = Code, y = Measured, color = Code,
+#               shape = PPFD))+
+#   geom_rect(aes(xmin = -Inf, xmax = Inf,
+#             ymin = hort_low,ymax = hort_high),
+#             fill = "green", alpha = 0.005, color = NA)+
+#   geom_hline(aes(yintercept = hort_low), linetype = "dotted",
+#             linewidth = 0.6, color = "darkgreen", alpha = 0.7)+
+#   geom_hline(aes(yintercept = hort_high), linetype = "dotted",
+#             linewidth = 0.6, color = "darkgreen", alpha = 0.7)+
+#   geom_hline(aes(yintercept = hort_low-hort_low),
+#              linetype = "dotted",
+#             linewidth = 1, color = "white", alpha = 0)+
+#   geom_hline(aes(yintercept = hort_high+hort_high),
+#              linetype = "dotted",
+#             linewidth = 1, color = "white", alpha = 0)+
+#   geom_jitter(stat = "identity", size = 3)+
+#   facet_wrap(~Nutrient, scales = "free") +
+# theme(panel.grid.major = element_blank(),
+#         panel.background = element_rect(fill = 'lightgrey'),
+#         panel.spacing = unit(1.5, "lines"),
+#         strip.background = element_rect(fill = "black"),
+#         strip.text = element_text(size = 14,
+#                                 face = "bold",
+#                                 color = "white"),
+#         axis.title.x = element_blank(),
+#         axis.ticks.x = element_blank(),
+#         axis.title.y = element_text(
+#          size = 16,
+#          face = "bold",
+#          margin = margin(r = 25)),
+#         axis.text.y = element_text(
+#          margin = margin(t = 5),
+#          size = 10,
+#          face = "bold"),
+#         axis.text.x = element_blank(),
+#         legend.title = element_text(size = 14,
+#                                   face = "bold"),
+#       legend.text = element_text(size = 12),
+#       legend.position = "right")+
+#      guides(colour = guide_legend(
+#        ncol = 1,
+#        title = "NSMS",
+#      override.aes = list(size = 2.0)))+
+#   ylab("Leaf nutrient content")+
+#      scale_color_npg()+
+#   scale_fill_npg()
+# 
+# 
+# 
+#   
+# macro_nutes <- combined_nutes %>%
+#   filter(Nutrient %in% c('N','P','K','Ca'))
+# 
+# macro_nutes %>%
+#   ggplot(aes(x = Code, y = mean,
+#               fill = PPFD)) +
+#   geom_hline(data = macro_nutes, aes(yintercept = target),
+#               color = "green", linetype = "solid", linewidth = 10, alpha = 0.2) +
+#   geom_hline(data = macro_nutes, aes(yintercept = target),
+#               color = "black", linetype = "dotted", linewidth = 0.5, alpha = 0.8
+#              ) +
+#   geom_errorbar(aes(ymin = mean - se,
+#                     ymax = mean + se),
+#                 width = 0.2,  position = position_dodge(0.5),
+#                 color = 'black') +
+#  ylab("Nutrient ppm")+
+#  theme_bw()+
+#  scale_fill_npg()+
+#   theme(
+#     axis.title.x = element_text(margin = margin(t = 20),
+#                                  size = 16,
+#                                 face = "bold",),
+#     axis.text.x = element_text(margin = margin(t = 10),
+#                                angle = 45,
+#                                size = 10,
+#                                face = "bold"),
+#     panel.grid.major = element_blank(),
+#         panel.spacing = unit(1.8, "lines"),
+#         strip.background = element_rect(fill = "black"),
+#         strip.text = element_text(size = 14,
+#                                 face = "bold",
+#                                 color = "white"),
+#         axis.title.y = element_text(
+#         size = 16,
+#         face = "bold",
+#         margin = margin(r = 25)),
+#         axis.text.y = element_text(
+#         margin = margin(t = 5),
+#         size = 10,
+#         face = "bold"),
+#       legend.title = element_text(size = 14,
+#                                   face = "bold"),
+#       legend.text = element_text(size = 12),
+#       legend.position = "right")+
+#      guides(colour = guide_legend(
+#      override.aes = list(size = 1.0)))+
+#   ylab("Nutrient Solution Concentration (PPM)")+
+#   xlab("NSMS")+
+#   geom_bar(stat = "identity", position = position_dodge(0.5),
+#            width = 0.5, alpha = 0.8)+
+#   facet_wrap(~Nutrient, scales = "free")
+
+  
+
+```
+
+# Creating Molar Solutions
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# 
+# fertilizer_grades <- googlesheets4::read_sheet(
+#     "1q4IZO6lQu-O8OWxk_yrDpp491L4E34AzTk-5W5Ieqfk",
+#               sheet = "Fertilizer Grades",
+#               col_types = c("c")) %>%
+#   pivot_longer(
+#     -c(1:3),
+#     names_to = "Nutrient",
+#     values_to = "Percent_Grade"
+#   ) %>%
+#   mutate(
+#     Percent_Grade = as.numeric(Percent_Grade)
+#   )
+# 
+# 
+# fertilizer_solubility <- googlesheets4::read_sheet(
+#     "1q4IZO6lQu-O8OWxk_yrDpp491L4E34AzTk-5W5Ieqfk",
+#     sheet = "Fertilizer Solubility",
+#     col_types = c("c")) %>%
+#     dplyr::select(c(1:6))
+# 
+
+
+```
+
+
+# Gas Exchange
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# ciras_1 <- import_ciras3("data/masters_project/ciras4/trial_07")
+#   
+# 
+# ciras_1 |>
+#   drop_na(A) |>
+#   dplyr::filter(Sample %in%  c("4","1")) |>
+#   make_sick_datatable()
+# 
+# ciras <- googlesheets4::read_sheet(
+#     "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+#               sheet = "CIRAS",
+#               col_types = c("c")) %>%
+#     mutate_at(vars(CIRAS_Log,Tcuv,gs,A,E,WUE,phiPSII,J), as.numeric) %>%
+#   dplyr::select(CIRAS_Log, A,gs,phiPSII,J)
+# 
+# 
+# sampling_key <- googlesheets4::read_sheet(
+#     "1CsVSxvv3FfAfQh2BAB2EbcErxOFQbtVnJVK3Bw-0cQc",
+#               sheet = "Sampling",
+#               col_types = c("c"))%>%
+#     mutate_at(vars(CIRAS_Log, Tray), as.numeric) %>%
+#   drop_na(CIRAS_Log) %>%
+#   dplyr::select(CIRAS_Log,NSMS,PPFD)
+# 
+# ciras_joined <- ciras %>%
+#   full_join(sampling_key) %>%
+#   mutate(
+#     PPFD = paste0(PPFD," PPFD"),
+#     Code = case_when(
+#       NSMS == "1" ~ "CTRL",
+#       NSMS == "2" ~ "FULL",
+#       NSMS == "3" ~ "EC",
+#       NSMS == "4" ~ "HALF",
+#       NSMS == "5" ~ "WUE",
+#       NSMS == "6" ~ "LAB"),
+#     Code = fct_relevel(Code, "CTRL","FULL","HALF","EC",
+#                                      "WUE","LAB")) %>%
+#   mutate_at(vars(PPFD,NSMS), as.factor) %>%
+#   slice(-56) 
+#   filter(PPFD == "500 PPFD")
+
+
+```
+
+
