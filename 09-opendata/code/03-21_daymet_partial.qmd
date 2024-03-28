@@ -29,9 +29,9 @@ Our learning objectives are to:
 # 
 # install.packages("sf")
 # install.packages("daymetr")
-install.packages("remotes")
-remotes::install_github("ropensci/USAboundaries")
-remotes::install_github("ropensci/USAboundariesData")
+# install.packages("remotes")
+# remotes::install_github("ropensci/USAboundaries")
+# remotes::install_github("ropensci/USAboundariesData")
 
 library(tidyverse)
 library(USAboundaries) # for US state boundaries
@@ -199,7 +199,7 @@ extracted
 
 
 ```{r}
-
+# 
 daymet_all <- field |>
   mutate(weather = pmap(list(.y = year,
                              .site = site,
@@ -219,7 +219,24 @@ daymet_all <- field |>
                           rename(.year = year,
                                  .site = site)))
 
-write_csv(daymet_all, "../data/daymet_all.csv")
+daymet_test <- daymet_all |>
+  unnest(weather) |>
+  pivot_wider(
+    names_from = measurement,
+    values_from = value
+  )|>
+  janitor::clean_names()
+
+
+write_csv(daymet_test, "../data/fieldweatherdata2.csv")
+
+daymet_all_csv <- read_csv("../data/daymet_all.csv",
+                       show_col_types = F)
+
+
+daymet_all |>
+  purrrlyr::by_row(~write.csv(.$weather, file = .$dataset))
+
 
 ```
 
