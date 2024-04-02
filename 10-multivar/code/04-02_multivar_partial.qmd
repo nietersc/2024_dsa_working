@@ -106,9 +106,12 @@ library(ggpmisc)
 ```
 
 ```{r}
-weather 
+
+weather <- read_csv("data/weather_monthsum.csv",
+                    show_col_types = F)
 
 weather
+
 ```
 
 
@@ -118,13 +121,16 @@ How are variables related? Any strong correlations that we should watch out for?
 Let's create a correlation matrix
 ```{r correlation matrix p-values}
 # Estimating significance matrix
-p.mat 
+p.mat <- weather |>
+  dplyr::select(-year,-site)|>
+  ggcorrplot::cor_pmat()
 
 p.mat
 ```
 
 Plotting  
 ```{r correlation matrix plot}
+
 weather %>%
   dplyr::select(-year, -site) %>%
   cor() %>%
@@ -136,7 +142,7 @@ weather %>%
              insig = "blank",
              lab = TRUE)
 
-ggsave("../output/corrmat.png",
+ggsave("output/corrmat.png",
        height = 25,
        width = 22,
        bg = "white")
@@ -145,7 +151,8 @@ ggsave("../output/corrmat.png",
 A bit difficult to see because we have so many predictors, let's extract in table format.  
 
 ```{r highest correlations}
-weather %>%
+
+high_corr <- weather %>%
   dplyr::select(-year, -site) %>%
   cor() %>% # calculates r (-1 to 1)
   as.data.frame() %>%
@@ -158,7 +165,8 @@ weather %>%
 ```
 
 ```{r lowest correlations}
-weather %>%
+
+low_corr <- weather %>%
   dplyr::select(-year, -site) %>%
   cor() %>% # calculates r (-1 to 1)
   as.data.frame() %>%
@@ -173,6 +181,7 @@ weather %>%
 How do variables relate to fiber strength in a bivariate relationship?  
 
 ```{r r2}
+
 weather %>%
   dplyr::select(-site, -year) %>%
   pivot_longer(cols=-strength_gtex) %>%
@@ -190,6 +199,7 @@ weather %>%
 ```
 
 ```{r r2 plot}
+
 weather %>%
   dplyr::select(-site, -year) %>%
   pivot_longer(cols=-strength_gtex) %>%
@@ -236,34 +246,45 @@ Multicollinearity is an issue because:
 Let's select a few variables to run some tests.  
 Two uncorrelated variables:
 ```{r uncorrelated}
+
 weather %>%
   ggplot(aes(x = mean_dayl.s_Apr, 
              y = sum_prcp.mm_Oct)) +
   geom_point() +
   geom_smooth(method="lm") +
   stat_correlation()
+
 ```
 
 Two correlated variables:
 ```{r correlated}
+
 weather %>%
   ggplot(aes(x = mean_dayl.s_Apr, 
              y = mean_dayl.s_May))+
   geom_point() +
-  geom_smooth(method="lm")
+  geom_smooth(method="lm")+
+  stat_correlation()
+
 
 ```
 
 Now let's fit some models with one or two uncorrelated and correlated variables explaining fiberstrength and see what happens.  
 
 ```{r strength ~ mean_dayl.s_Apr}
-lm_dayl.apr 
+
+lm_dayl.apr <- lm(strength_gtex ~  mean_dayl.s_Apr,
+                  data = weather) |>
+  broom::tidy() |>
+  filter(!term == "(Intercept)") |>
+  mutate(mod = "lm_dayl.s_apr")
 
 lm_dayl.apr
 
 ```
 
 ```{r strength ~ sum_prcp.mm_Oct}
+
 lm_prp.oct <- lm(strength_gtex ~ sum_prcp.mm_Oct,
    data = weather) %>%
   tidy() %>%
@@ -274,6 +295,7 @@ lm_prp.oct
 ```
 
 ```{r strength ~ mean_dayl.s_Apr + sum_prcp.mm_Oct}
+
 lm_dayl.prcp <- lm(strength_gtex ~ mean_dayl.s_Apr + 
                    sum_prcp.mm_Oct,
    data = weather) %>%
@@ -286,6 +308,7 @@ lm_dayl.prcp
 ```
 
 ```{r strength ~ mean_dayl.s_Apr + mean_dayl.s_May}
+
 lm_daylapr.daylmay <- lm(strength_gtex ~ mean_dayl.s_Apr + 
                   mean_dayl.s_May,
    data = weather) %>%
@@ -298,17 +321,23 @@ lm_daylapr.daylmay
 ```
 
 ```{r Checking multicollinearity}
+
 lm_dayl.apr %>%
   bind_rows(lm_prp.oct, 
             lm_dayl.prcp,
-            lm_daylapr.daylmay) %>%
-  mutate(mod=factor(mod,
-                    levels=c("lm_dayl.apr",
-                             "lm_prp.oct",
-                             "lm_2var.uncor",
-                             "lm_2var.cor"))) %>%
-  filter(term != "mean_dayl.s_May") %>%
-  ggplot(aes(x=mod))
+            lm_daylapr.daylmay)|>
+  # mutate(mod=factor(mod,
+  #                   levels=c("lm_dayl.apr",
+  #                            "lm_prp.oct",
+  #                            "lm_2var.uncor",
+  #                            "lm_2var.cor"))) %>%
+  filter(term != "mean_dayl.s_May") |>
+  ggplot(aes(x=mod)) +
+  geom_pointrange(aes(y = estimate,
+                      ymin = estimate - std.error,
+                      ymax = estimate + std.error))+
+  facet_wrap(~term, scales = "free_y")+
+  scale_x_discrete(guide = guide_axis(n.dodge = 2))
 
 ```
 
@@ -326,6 +355,12 @@ General rule of thumb:
 Let's check the variance inflation factor (VIF) of both uncorrelated and correlated models
 ```{r vif uncorrelated}
 # Uncorrelated
+lm(strength_gtex ~ mean_dayl.s_Apr + 
+                   sum_prcp.mm_Oct,
+   data = weather) |>
+  vif()
+
+
 ```
 
 
