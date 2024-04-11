@@ -1,0 +1,77 @@
+---
+title: "Midterm Makeup"
+format: html
+author: "Chris Nieters"
+date: Sys.Date()
+editor_options:
+  chunk_output_type: console
+---
+
+Chris Nieters
+
+# Question 3:
+When performing an analysis to identify the level of an input that optimizes an output in class, we covered 4 regression models. Select below which were they:
+
+  - My original was wrong because I selected selected spherical and exponential as analysis methods, which are not used in optimizing regression models. 
+  
+  - The correct answers were linear-plateau, exponential, linear, and intercept only. 
+  
+  
+# Question 10: 
+List the name of three spatial correlation structures used in repeated measure analysis:
+
+  - My original answers for correlation structures used in repeated measure analysis where least-squares, orthogonal, and serial - none of which are close to correct. I had to guess, sorry!
+  
+  - Three spatial correlation structures that are actually used in repeated measure analysis are variogram models such as exponential, Gaussian, and linear.
+  
+
+# Question 28:
+The command
+git commit -m "commit message"
+is used to send local git-tracked file changes to GitHub.
+
+  - I answered true, which was false. git commit -m "commit message" commits changes to the repository locally, not to GitHub.
+  
+  - The correct answer is False
+  
+
+# Question 7:
+Select below only the name of serial correlation structures:
+
+  - My answer was incorrect because I only chose compound symmetry.
+
+  - The correct answer for only serial correlation structures are compound symmetry, general, and autoregressive-moving average
+  
+
+# Question 11:
+What are the two components that we can consider when feature engineering weather data, as seen in class?
+
+  - My answer was wrong because my response "time" was not specific to "time window" and "space" doesn't apply.
+
+  - The correct answers are "time window" such as month day year and "function" such as mean, median, etc.
+
+# Question 15:
+What are the two components of a study design?
+
+  - I answered hypothesis and randomization, which hypothesis is done to inform the study design, and randomization is part of the experimental design.
+  
+  - The correct answers are treatment design and experimental design.
+  
+
+# Question 17:
+List the two factors that should be considered when selecting an experimental design:
+
+  - I answered hypothesis and treatment application, which are not part of experimental design.
+  
+  - The correct factors are homogeneity of experimental material and limitations of your project such as space and funding.
+  
+# Question 16:
+Select all options that reflect strategies to increase the power of a design study:
+
+  - I selected all three options: the first two can't be accomplished through the design of a study.
+  
+  - The correct answer is only selecting "	
+Have less variability explained by error through less degrees of freedom in the error"
+
+
+  
