@@ -223,7 +223,7 @@ weather %>%
   geom_smooth(method = "lm", 
               se = F, 
               color = "black", 
-              size = 1)+
+              linewidth = 1)+
   facet_wrap(~name, 
              scales = "free_x", 
              ncol=2) 
@@ -343,7 +343,7 @@ lm_dayl.apr %>%
 
 What has happened with **mean_dayl.s_April** and **sum_prcp.mm_Oct** estimates and standard error when modeled i) alone, or with another uncorrelated variable vs. ii) with another correlated variable?
 
-One way to check the degree of multicollinearity between two predictos is with the variance inflation factor (VIF).  
+One way to check the degree of multicollinearity between two predictors is with the variance inflation factor (VIF).  
 
 VIF values range from 1 to positive infinite.  
 General rule of thumb:  
