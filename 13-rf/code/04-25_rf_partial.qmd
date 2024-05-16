@@ -1,6 +1,10 @@
 ---
 title: "Random forest"
 format: html
+author: "Chris Nieters"
+date: Sys.Date()
+editor_options:
+  chunk_output_type: console
 ---
 
 # Learning objectives  
