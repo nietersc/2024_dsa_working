@@ -139,18 +139,22 @@ weather_split
 
 
 ```{r weather_train}
+
 # Setting train set 
 weather_train <- training(weather_split)
 
 weather_train
+
 ```
 How many observations?
 
 ```{r weather_test}
+
 # Setting test split
 weather_test <- testing(weather_split)
 
 weather_test
+
 ```
 How many observations?  
 
@@ -182,16 +186,20 @@ weather_recipe <-
   recipe(strength_gtex ~ .,
          data = weather_train) %>%
   # Removing year and site  
-    step_rm(year, site, matches("Jan|Feb|Mar|Apr|Nov|Dec")) %>%
+  step_rm(year,
+          site,
+          matches("Jan|Feb|Mar|Apr|Nov|Dec")) %>%
   # Normalizing all numeric variables except predicted variable
   step_normalize(all_numeric(), -all_outcomes())
 
 weather_recipe
+
 ```
 
 Now that we have our recipe ready, we **need to apply it** to the training data in a process called prepping:
 
 ```{r weather_prep}
+
 weather_prep <- weather_recipe %>%
   prep()
 
@@ -220,12 +228,17 @@ Let's create a model specification that will **fine-tune** the first two for us.
 A given model type can be fit with different engines (e.g., through different packages). Here, we'll use the **partykit** engine/package.  
   
 ```{r cit_spec}
-cit_spec  
+
+library(bonsai)
+
+cit_spec  <- 
   # Specifying cit as our model type, asking to tune the hyperparameters
+  parsnip::decision_tree(
+    tree_depth = tune::tune()) |>
+  set_engine("partykit",
+             conditional_min_criterion = tune()) |>
+  set_mode("regression")
 
-    # Specify the engine
-
-    # Specifying mode  
 
 cit_spec
 ```
@@ -245,6 +258,7 @@ For our iterative search, we need:
   
 Let's define our resampling strategy below, using a 5-fold cross validation approach:  
 ```{r resampling_foldcv}
+
 set.seed(34549)
 resampling_foldcv <- vfold_cv(weather_train, 
                               v = 5)
@@ -252,6 +266,7 @@ resampling_foldcv <- vfold_cv(weather_train,
 resampling_foldcv
 resampling_foldcv$splits[[1]]
 resampling_foldcv$splits[[2]]
+
 ```
 On each fold, we'll use **390** observations for training and **98** observations to assess performance.    
 
@@ -260,7 +275,14 @@ Now, let's define our parameter information.
 We need to create this object because engine-specific hyperparameters have a missing object, and it is required to be not missing to perform simulated annealing.  
 
 ```{r cit_param}
-cit_param 
+
+cit_param <- cit_spec |>
+  extract_parameter_set_dials() |>
+  update(conditional_min_criterion = 
+           conditional_min_criterion())
+
+cit_param
+cit_param$object
 
 ```
 
@@ -283,8 +305,18 @@ Here's how it works:
 In the algorithm below, we are asking for 50 iterations.  
 
 ```{r cit_grid_result}
+
 set.seed(76544)
-cit_grid_result 
+
+cit_grid_result <- tune_sim_anneal(
+  object = cit_spec,
+  preprocessor = weather_recipe,
+  resamples = resampling_foldcv,
+  param_info = cit_param,
+  iter = 50
+) 
+
+cit_grid_result$.metrics
 
 ```
 Notice how we have a column for iterations.  
@@ -294,6 +326,7 @@ Let's collect a summary of metrics (across all folds, for each iteration), and p
 
 Firs, RMSE (lower is better):
 ```{r RMSE}
+
 cit_grid_result %>%
   collect_metrics() %>%
   filter(.metric == "rmse") %>%
@@ -307,6 +340,7 @@ cit_grid_result %>%
   scale_y_continuous(breaks = seq(1,15,2)) +
   geom_text(aes(label = .iter), nudge_x = .0005) +
   labs(title = "RMSE")
+
 ```
 
 What tree_depth and min criterion values created lowest RMSE?  
@@ -335,15 +369,23 @@ cit_grid_result %>%
 
 ```{r}
 # Based on lowest RMSE
-best_rmse <- cit_grid_result 
+best_rmse <- cit_grid_result |>
+ tune::select_by_one_std_err(
+    "tree_depth",
+    metric = "rmse")
 
 best_rmse
 
 ```
 
 ```{r}
+
 # Based on greatest R2
-best_r2 <- cit_grid_result 
+best_r2 <- cit_grid_result |>
+ tune::select_by_one_std_err(
+    "tree_depth",
+    metric = "rsq")
+
 
 best_r2
 
@@ -360,7 +402,8 @@ Let's use the hyperparameter values that optimized R2 to fit our final model.
 
 ```{r final_spec}
 
-final_spec <- decision_tree(tree_depth = best_r2$tree_depth) %>%
+final_spec <- decision_tree(
+  tree_depth = best_r2$tree_depth) %>%
   # Specify the engine
   set_engine("partykit",
              conditional_min_criterion = best_r2$conditional_min_criterion) %>%
@@ -382,22 +425,28 @@ This means 2 things:
 These 2 steps can be completed in one function, as below:  
 
 ```{r final_fit}
+
+#train on entire training set, not just folds
 final_fit <- last_fit(final_spec,
                 weather_recipe,
                 split = weather_split)
 
 final_fit %>%
   collect_predictions()
+
 ```
 
 Metrics on the **test set**:
 ```{r}
+
 final_fit %>%
   collect_metrics()
+
 ```
 
 Metrics on **train set** (for curiosity and compare to test set):  
 ```{r}
+
 # RMSE
 final_spec %>%
   fit(strength_gtex ~ .,
@@ -425,6 +474,7 @@ How does metrics on test compare to metrics on train?
 
 Predicted vs. observed plot:  
 ```{r}
+
 final_fit %>%
   collect_predictions() %>%
   ggplot(aes(x = strength_gtex,
@@ -434,6 +484,7 @@ final_fit %>%
   geom_smooth(method = "lm") +
   scale_x_continuous(limits = c(20, 40)) +
   scale_y_continuous(limits = c(20, 40)) 
+
 ```
 Why the 3 horizontal lines?  
 
@@ -441,6 +492,7 @@ How can we get more horizontal lines in this type of algorithm?
 
 Variable importance:  
 ```{r}
+
 final_spec %>%
   fit(strength_gtex ~ .,
          data = bake(weather_prep, weather)) %>%
@@ -459,6 +511,12 @@ final_spec %>%
 Tree:  
 
 ```{r}
+
+final_spec |>
+  fit(strength_gtex ~.,
+      data = bake(weather_prep, weather)) %>%
+  .$fit |>
+  plot()
 
   
 ```

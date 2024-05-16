@@ -339,6 +339,15 @@ enet_grid <- tidyr::crossing(penalty = seq(0,
                                     1, 
                                     by = 0.2))
 
+# package in tidymodels called dials to create grid
+# allows us to create a grid that contains points in regions
+# that are more likely to contain an optimal hyperparameter
+enet_grid <- dials::grid_regular(
+  penalty(),
+  mixture(),
+  levels = list(penalty = 50,
+                mixture = 10))
+
 enet_grid
 
 ```
@@ -472,7 +481,8 @@ model.
 
 final_spec <- parsnip::linear_reg(penalty = best_r2$penalty,
                          mixture = best_r2$mixture
-                         )
+                         )|>
+  set_engine("glmnet")
 
 final_spec
 
