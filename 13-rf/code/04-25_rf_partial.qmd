@@ -137,9 +137,11 @@ library(finetune)
 ```
 
 ```{r weather}
+
 weather <- read_csv("../data/weather_monthsum.csv")
 
 weather
+
 ```
 
 # ML workflow  
@@ -152,6 +154,7 @@ Here's where we perform **data split** and **data processing**.
 For data split, let's use **70% training / 30% testing**.
 
 ```{r weather_split}
+
 # Setting seed to get reproducible results  
 set.seed(931735)
 
@@ -160,22 +163,27 @@ weather_split <- initial_split(weather,
                                prop = .7)
 
 weather_split
+
 ```
 
 
 ```{r weather_train}
+
 # Setting train set 
 weather_train <- training(weather_split)
 
 weather_train
+
 ```
 How many observations?
 
 ```{r weather_test}
+
 # Setting test split
 weather_test <- testing(weather_split)
 
 weather_test
+
 ```
 How many observations?  
 
@@ -202,6 +210,7 @@ You can find all available recipe step options here: https://tidymodels.github.i
 > Differently from elastic net, variables do not need to be normalized in random forest, so we'll skip this step  
 
 ```{r weather_recipe}
+
 weather_recipe <-
   # Defining predicted and predictor variables
   recipe(strength_gtex ~ .,
@@ -212,15 +221,18 @@ weather_recipe <-
   #step_normalize(all_numeric(), -all_outcomes())
 
 weather_recipe
+
 ```
 
 Now that we have our recipe ready, we **need to apply it** to the training data in a process called prepping:
 
 ```{r weather_prep}
+
 weather_prep <- weather_recipe %>%
   prep()
 
 weather_prep
+
 ```
 
 
@@ -245,12 +257,17 @@ Let's create a model specification that will **fine-tune** the first two for us.
 A given model type can be fit with different engines (e.g., through different packages). Here, we'll use the **ranger** engine/package.  
   
 ```{r rf_spec}
+
 rf_spec <- 
   # Specifying rf as our model type, asking to tune the hyperparameters
+  parsnip::rand_forest(
+    trees = tune(),
+    mtry = tune())|>
+    # if want to train node num
+    # min_n = tune(),)|>
+  set_engine("ranger") |>
+  set_mode("regression")
 
-    # Specify the engine
-
-    # Specifying mode  
 
 rf_spec
 ```
@@ -267,13 +284,16 @@ For our iterative search, we need:
 
 Let's define our resampling strategy below, using a 5-fold cross validation approach:  
 ```{r resampling_foldcv}
+
 set.seed(34549)
+
 resampling_foldcv <- vfold_cv(weather_train, 
                               v = 5)
 
 resampling_foldcv
 resampling_foldcv$splits[[1]]
 resampling_foldcv$splits[[2]]
+
 ```
 On each fold, we'll use **390** observations for training and **98** observations to assess performance.    
 
@@ -296,25 +316,30 @@ Here's how it works:
 In the algorithm below, we are asking for 50 iterations.  
 
 ```{r rf_grid_result}
+
 set.seed(76544)
+
 rf_grid_result <- tune_sim_anneal(object = rf_spec,
                      preprocessor = weather_recipe,
                      resamples = resampling_foldcv,
-                    #param_info = rf_param,
+                    #param_info = rf_param, - don't need
+                    #only have engine level hyperparams for rf
                     iter = 50
                      )
 
 
 rf_grid_result
 rf_grid_result$.metrics[[2]]
+
 ```
 Notice how we have a column for iterations.  
 The first iteration uses a sensible value for the hyper-parameters, and then starts "walking" the parameter space in the direction of greatest improvement.  
 
 Let's collect a summary of metrics (across all folds, for each iteration), and plot them.  
 
-Firs, RMSE (lower is better):
+First, RMSE (lower is better):
 ```{r RMSE}
+
 rf_grid_result %>%
   collect_metrics() %>%
   filter(.metric == "rmse") %>%
@@ -327,6 +352,7 @@ rf_grid_result %>%
   scale_color_viridis_b() +
   geom_text(aes(label = .iter), nudge_x = .0005) +
   labs(title = "RMSE")
+
 ```
 
 What tree_depth and min criterion values created lowest RMSE?  
@@ -334,6 +360,7 @@ What tree_depth and min criterion values created lowest RMSE?
 Now, let's look into R2 (higher is better):  
 
 ```{r R2}
+
 rf_grid_result %>%
   collect_metrics() %>%
   filter(.metric == "rsq") %>%
@@ -352,16 +379,26 @@ rf_grid_result %>%
 > Previously, we selected the single best model. Now, let's select the best model within one std error of the metric, so we choose a model among the top ones that is more parsimonious.  
 
 ```{r}
+
 # Based on lowest RMSE
-best_rmse <- rf_grid_result 
+best_rmse <- rf_grid_result |>
+  select_by_pct_loss(
+    "trees",
+    metric = "rmse",
+    limit = 2)
 
 best_rmse
 
 ```
 
 ```{r}
+
 # Based on greatest R2
-best_r2 <- rf_grid_result 
+best_r2 <- rf_grid_result |>
+    select_by_pct_loss(
+    "trees",
+    metric = "rsq",
+    limit = 2)
 
 
 best_r2
@@ -378,15 +415,18 @@ Based on R2, we would choose
 Let's use the hyperparameter values that optimized R2 to fit our final model.
 
 ```{r final_spec}
+
 final_spec <- rand_forest(trees = best_r2$trees,
                           mtry = best_r2$mtry) %>%
   # Specify the engine
-
+  set_engine("ranger",
+             importance = "permutation") |>
     # Specifying mode  
   set_mode("regression")
   
 
 final_spec
+
 ```
 
 ## 3. Validation  
@@ -399,22 +439,27 @@ This means 2 things:
 These 2 steps can be completed in one function, as below:  
 
 ```{r final_fit}
+
 final_fit <- last_fit(final_spec,
                 weather_recipe,
                 split = weather_split)
 
 final_fit %>%
   collect_predictions()
+
 ```
 
 Metrics on the **test set**:
 ```{r}
+
 final_fit %>%
   collect_metrics()
+
 ```
 
 Metrics on **train set** (for curiosity and compare to test set):  
 ```{r}
+
 # RMSE
 final_spec %>%
   fit(strength_gtex ~ .,
@@ -442,6 +487,7 @@ How does metrics on test compare to metrics on train?
 
 Predicted vs. observed plot:  
 ```{r}
+
 final_fit %>%
   collect_predictions() %>%
   ggplot(aes(x = strength_gtex,
@@ -451,6 +497,7 @@ final_fit %>%
   geom_smooth(method = "lm") +
   scale_x_continuous(limits = c(20, 40)) +
   scale_y_continuous(limits = c(20, 40)) 
+
 ```
 
 Variable importance: 
@@ -466,6 +513,7 @@ The decrease in accuracy as a result of this randomly shuffling of feature value
 The variables with the **largest average decrease in accuracy** are considered **most important**.  
 
 ```{r}
+
 final_spec %>%
   fit(strength_gtex ~ .,
          data = bake(weather_prep, weather)) %>%
